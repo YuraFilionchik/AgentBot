@@ -52,7 +52,7 @@ namespace AgentBot.AiAgents
             _logger.LogInformation("Chat {ChatId}: Gemini ← {Message}", chatId, message);
 
             // Формируем контекст пользователя
-            var userContext = await _llmWrapper.BuildUserContextAsync(chatId, null, "user");
+            var userContext = await _llmWrapper.BuildUserContextAsync(chatId, string.Empty, "user");
             userContext.AvailableTools.AddRange(tools.Select(t => new ToolInfo
             {
                 Name = t.Name,
@@ -61,7 +61,7 @@ namespace AgentBot.AiAgents
             }));
 
             // Формируем системный промпт
-            string systemPrompt = await _llmWrapper.BuildSystemPromptAsync(userContext);
+            string systemPrompt = _llmWrapper.BuildSystemPromptAsync(userContext);
 
             // Преобразуем сообщение с учётом алиасов
             string processedMessage = await _llmWrapper.BuildUserMessageAsync(chatId, message);
@@ -72,19 +72,16 @@ namespace AgentBot.AiAgents
             // Добавляем системный промпт как первое сообщение (если история пуста)
             if (history.Count == 0)
             {
-                history.Add(new Content
-                {
-                    Role = "user",
-                    Parts = { new Part { Text = systemPrompt } }
-                });
+                var systemContent = new Content { Role = "user" };
+                systemContent.Parts ??= new ();
+                systemContent.Parts.Add(new Part { Text = systemPrompt });
+                history.Add(systemContent);
             }
 
             // Добавляем сообщение пользователя в историю
-            var userContent = new Content
-            {
-                Role = "user",
-                Parts = { new Part { Text = processedMessage } }
-            };
+            var userContent = new Content { Role = "user" };
+            userContent.Parts ??= new ();
+            userContent.Parts.Add(new Part { Text = processedMessage });
             history.Add(userContent);
 
             // Подготовка инструментов
@@ -97,15 +94,14 @@ namespace AgentBot.AiAgents
             {
                 try
                 {
-                    var config = new GenerateContentConfig
+                    var config = new GenerateContentConfig();
+                    config.Tools ??= new List<Tool>();
+                    config.Tools.Add(tool);
+                    config.ToolConfig = new ToolConfig
                     {
-                        Tools = { tool },
-                        ToolConfig = new ToolConfig
+                        FunctionCallingConfig = new FunctionCallingConfig
                         {
-                            FunctionCallingConfig = new FunctionCallingConfig
-                            {
-                                Mode = FunctionCallingConfigMode.Auto
-                            }
+                            Mode = FunctionCallingConfigMode.Auto
                         }
                     };
 

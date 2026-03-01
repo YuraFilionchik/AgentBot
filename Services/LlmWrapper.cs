@@ -16,7 +16,7 @@ namespace AgentBot.Services
         /// <summary>
         /// Формирует системный промпт с учётом контекста пользователя.
         /// </summary>
-        Task<string> BuildSystemPromptAsync(UserContext context);
+        string BuildSystemPromptAsync(UserContext context);
 
         /// <summary>
         /// Формирует пользовательское сообщение с учётом алиасов.
@@ -43,7 +43,7 @@ namespace AgentBot.Services
             _logger = logger;
         }
 
-        public async Task<string> BuildSystemPromptAsync(UserContext context)
+        public string BuildSystemPromptAsync(UserContext context)
         {
             var sb = new StringBuilder();
 

@@ -124,6 +124,7 @@ namespace AgentBot.Memory
                 var parts = JsonSerializer.Deserialize<List<Part>>(partsJson, _jsonOptions) ?? new List<Part>();
 
                 var content = new Content { Role = role };
+                content.Parts ??= new ();
                 content.Parts.AddRange(parts);
                 history.Add(content);
             }

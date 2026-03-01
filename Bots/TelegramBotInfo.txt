@@ -1,0 +1,47 @@
+﻿Вот наиболее часто используемые методы (функции) из библиотеки **Telegram.Bot** версии **22.9.0** (поддерживает Bot API 9.4). В версии 22.x убрали суффикс `Async` из названий методов — все публичные методы асинхронные по умолчанию.
+
+Список составлен на основе реальной практики, примеров из репозитория TelegramBots/Telegram.Bot.Examples, документации и популярных шаблонов использования в 2025–2026 годах.
+
+| Метод                          | Возвращаемый тип          | Основные параметры (самые используемые)                                                                 | Когда используют (самые частые сценарии)                          |
+|-------------------------------|----------------------------|----------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------|
+| `GetMe`                       | `Task<User>`              | — (без параметров)                                                                                       | Проверка подключения, получение информации о боте при старте       |
+| `SendMessage`                 | `Task<Message>`           | `ChatId chatId`, `string text`, `IReplyMarkup? replyMarkup = null`, `int? messageThreadId = null`, `bool? disableNotification = null` | Отправка текстовых сообщений (самый популярный метод)              |
+| `SendPhoto`                   | `Task<Message>`           | `ChatId chatId`, `InputFile photo`, `string? caption = null`, `IReplyMarkup? replyMarkup = null`       | Отправка фото с подписью или без                                    |
+| `SendDocument`                | `Task<Message>`           | `ChatId chatId`, `InputFile document`, `string? caption = null`, `IReplyMarkup? replyMarkup = null`    | Отправка файлов, pdf, документов                                    |
+| `SendVideo`                   | `Task<Message>`           | `ChatId chatId`, `InputFile video`, `string? caption = null`, `int? duration = null`, `IReplyMarkup? replyMarkup = null` | Отправка видео                                                      |
+| `SendSticker`                 | `Task<Message>`           | `ChatId chatId`, `InputFile sticker`, `IReplyMarkup? replyMarkup = null`                                | Отправка стикеров                                                   |
+| `SendMediaGroup`              | `Task<Message[]>`         | `ChatId chatId`, `IEnumerable<IAlbumInputMedia> media`                                                  | Отправка группы фото/видео (альбом)                                 |
+| `EditMessageText`             | `Task<Message>`           | `ChatId chatId`, `int messageId`, `string text`, `IReplyMarkup? replyMarkup = null`                     | Редактирование ранее отправленного текста                           |
+| `EditMessageCaption`          | `Task<Message>`           | `ChatId chatId`, `int messageId`, `string? caption`, `IReplyMarkup? replyMarkup = null`                 | Изменение подписи у медиа                                           |
+| `DeleteMessage`               | `Task<bool>`              | `ChatId chatId`, `int messageId`                                                                        | Удаление своего или чужого сообщения (если есть права)             |
+| `AnswerCallbackQuery`         | `Task<bool>`              | `string callbackQueryId`, `string? text = null`, `bool? showAlert = false`, `string? url = null`, `int? cacheTime = null` | Обработка нажатия inline-кнопки (обязательно вызывать)             |
+| `GetUpdates`                  | `Task<Update[]>`          | `int? offset = null`, `int? limit = 100`, `int? timeout = null`, `IEnumerable<UpdateType>? allowedUpdates = null` | Ручной polling (реже, обычно используют `StartReceiving`)          |
+| `SetWebhook`                  | `Task<bool>`              | `string url`, `InputFile? certificate = null`, `string? secretToken = null`                             | Настройка webhook вместо polling                                    |
+| `DeleteWebhook`               | `Task<bool>`              | `string? dropPendingUpdates = null`                                                                     | Отключение webhook                                                  |
+| `GetWebhookInfo`              | `Task<WebhookInfo>`       | —                                                                                                        | Проверка текущего состояния webhook                                 |
+| `LeaveChat`                   | `Task<bool>`              | `ChatId chatId`                                                                                         | Выход бота из группы/канала                                         |
+| `GetChat`                     | `Task<Chat>`              | `ChatId chatId`                                                                                         | Получение информации о чате/группе                                  |
+| `GetChatMember`               | `Task<ChatMember>`        | `ChatId chatId`, `long userId`                                                                          | Проверка статуса участника (админ/обычный/заблокирован и т.д.)     |
+| `BanChatMember`               | `Task<bool>`              | `ChatId chatId`, `long userId`, `DateTime? untilDate = null`, `bool? revokeMessages = null`             | Бан пользователя в группе                                           |
+| `UnbanChatMember`             | `Task<bool>`              | `ChatId chatId`, `long userId`, `bool? onlyIfBanned = null`                                             | Разбан пользователя                                                 |
+
+### Краткие заметки по самым популярным комбинациям (2026)
+
+- **Базовый запуск бота**  
+  `GetMe` → проверка токена  
+  `StartReceiving(updateHandler, errorHandler, receiverOptions)` → основной polling-цикл
+
+- **Типичный обработчик сообщений**  
+  `if (update.Message?.Text != null)` → `SendMessage` или `EditMessageText`
+
+- **Inline-кнопки**  
+  Получение `update.CallbackQuery` → **обязательно** `AnswerCallbackQuery` (иначе крутилка не исчезнет) → `EditMessageText` / `SendMessage`
+
+- **Самые частые ReplyMarkup**  
+  `ReplyKeyboardMarkup` (обычная клавиатура)  
+  `InlineKeyboardMarkup` (inline-кнопки)  
+  `ReplyKeyboardRemove` (убрать клавиатуру)
+
+Если вам нужны более редкие, но полезные методы (например, `SendPoll`, `SendInvoice`, `CreateForumTopic`, `SetMyCommands`, `GetFile`, `DownloadFile` и т.д.) — напишите, добавлю их в справочник.
+
+Удачи с ботом!

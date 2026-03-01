@@ -116,6 +116,9 @@ namespace AgentBot.AiAgents
 
                     var content = candidate.Content;
 
+                    // Логируем роль для отладки
+                    _logger.LogDebug("Chat {ChatId}: получена роль от Gemini: {Role}", chatId, content.Role);
+
                     // Финальный текстовый ответ
                     var textPart = content.Parts?.FirstOrDefault(p => !string.IsNullOrEmpty(p.Text));
                     if (textPart != null)
@@ -136,8 +139,14 @@ namespace AgentBot.AiAgents
                     if (!functionCallParts.Any())
                         return "Gemini не смог сгенерировать ответ.";
 
-                    // Сохраняем вызов функции в историю
-                    await _memory.AddMessageAsync(chatId, content);
+                    // НЕ сохраняем function call в персистентную историю,
+                    // а добавляем только в текущий список history для следующего запроса
+                    var functionCallContent = new Content
+                    {
+                        Role = "model",
+                        Parts = functionCallParts.Select(p => new Part { FunctionCall = p.FunctionCall }).ToList()
+                    };
+                    history.Add(functionCallContent);
 
                     var toolResponseParts = new List<Part>();
 
@@ -169,16 +178,26 @@ namespace AgentBot.AiAgents
                         toolResponseParts.Add(responsePart);
                     }
 
-                    // Добавляем результаты инструментов в историю
+                    // Добавляем function response в историю (только в текущий список, не в персистентное хранилище)
                     var toolResponseContent = new Content
                     {
-                        Role = "user",
+                        Role = "tool",
                         Parts = toolResponseParts
                     };
-                    await _memory.AddMessageAsync(chatId, toolResponseContent);
+                    history.Add(toolResponseContent);
 
-                    // Обновляем историю для следующего цикла
-                    history = await _memory.GetHistoryAsync(chatId, 20);
+                    // Логируем историю для отладки
+                    _logger.LogDebug("Chat {ChatId}: история для следующего запроса ({Count} сообщений):", chatId, history.Count);
+                    foreach (var h in history)
+                    {
+                        var partTypes = string.Join(", ", h.Parts?.Select(p =>
+                            p.Text != null ? "text" :
+                            p.FunctionCall != null ? $"functionCall({p.FunctionCall.Name})" :
+                            p.FunctionResponse != null ? $"functionResponse({p.FunctionResponse.Name})" :
+                            "unknown") ?? Enumerable.Empty<string>());
+                        _logger.LogDebug("  Role={Role}, Parts=[{PartTypes}]", h.Role, partTypes);
+                    }
+
                     iteration++;
                 }
                 catch (Exception ex)
@@ -202,7 +221,7 @@ namespace AgentBot.AiAgents
                 Type = Type.Object,
                 Properties = tool.Parameters.ToDictionary(
                     kvp => kvp.Key,
-                    kvp => new Schema { Type = GetSchemaType(kvp.Value) }
+                    kvp => GetSchema(kvp.Value)
                 ),
                 Required = tool.Parameters.Keys.ToList()
             };
@@ -215,15 +234,35 @@ namespace AgentBot.AiAgents
             };
         }
 
-        private static Google.GenAI.Types.Type GetSchemaType(string typeStr) => typeStr.ToLower() switch
+        private static Schema GetSchema(string typeStr, string? description = null)
         {
-            "string" => Google.GenAI.Types.Type.String,
-            "number" => Google.GenAI.Types.Type.Number,
-            "integer" => Google.GenAI.Types.Type.Integer,
-            "boolean" => Google.GenAI.Types.Type.Boolean,
-            "array" => Google.GenAI.Types.Type.Array,
-            _ => Google.GenAI.Types.Type.String
-        };
+            var lowerType = typeStr.ToLower();
+            var schema = new Schema
+            {
+                Type = lowerType switch
+                {
+                    "string" => Google.GenAI.Types.Type.String,
+                    "number" => Google.GenAI.Types.Type.Number,
+                    "integer" => Google.GenAI.Types.Type.Integer,
+                    "boolean" => Google.GenAI.Types.Type.Boolean,
+                    "array" => Google.GenAI.Types.Type.Array,
+                    _ => Google.GenAI.Types.Type.String
+                }
+            };
+
+            // Для массивов указываем схему элементов (по умолчанию - строки)
+            if (lowerType == "array")
+            {
+                schema.Items = new Schema { Type = Google.GenAI.Types.Type.Object };
+            }
+
+            if (!string.IsNullOrEmpty(description))
+            {
+                schema.Description = description;
+            }
+
+            return schema;
+        }
 
         private static Struct JsonToStruct(string json)
         {

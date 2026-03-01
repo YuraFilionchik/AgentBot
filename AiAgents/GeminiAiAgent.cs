@@ -163,6 +163,7 @@ namespace AgentBot.AiAgents
                         }
 
                         var args = fc.Args ?? new Dictionary<string, object>();
+                        _logger.LogDebug("Chat {ChatId}: Аргументы функции {Name}: {Args}", chatId, fc.Name, JsonSerializer.Serialize(args));
 
                         string resultJson = await toolFunc.ExecuteAsync(args);
 

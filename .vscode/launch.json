@@ -2,6 +2,14 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "type": "dockerfile",
+            "request": "launch",
+            "name": "Docker: Build",
+            "dockerfile": "Dockerfile",
+            "contextPath": "${workspaceFolder}"
+        },
+        
+        {
             // Используйте IntelliSense, чтобы узнать, какие атрибуты существуют для отладки C#.
             // Используйте наведение для описания существующих атрибутов
             // Для получения дополнительных сведений посетите https://github.com/dotnet/vscode-csharp/blob/main/debugger-launchjson.md

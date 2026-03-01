@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using Telegram.Bot.Types;
 
 namespace AgentBot.Handlers
@@ -14,23 +15,26 @@ namespace AgentBot.Handlers
     {
         private readonly CommandHandler _commandHandler;
         private readonly IAiAgent _aiAgent;
-        private readonly IBotProvider _botProvider;
+        private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<MessageProcessor> _logger;
         private readonly List<IToolFunction> _tools;
 
         public MessageProcessor(
             CommandHandler commandHandler,
             IAiAgent aiAgent,
-            IBotProvider botProvider,
+            IServiceProvider serviceProvider,
             ILogger<MessageProcessor> logger,
             IEnumerable<IToolFunction> tools)
         {
             _commandHandler = commandHandler ?? throw new ArgumentNullException(nameof(commandHandler));
             _aiAgent = aiAgent ?? throw new ArgumentNullException(nameof(aiAgent));
-            _botProvider = botProvider ?? throw new ArgumentNullException(nameof(botProvider));
+            _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _tools = tools?.ToList() ?? new List<IToolFunction>();
         }
+
+        private IBotProvider BotProvider => _serviceProvider.GetRequiredService<IBotProvider>();
+
 
         public async Task ProcessAsync(Message message)
         {
@@ -66,13 +70,13 @@ namespace AgentBot.Handlers
 
                 if (!string.IsNullOrWhiteSpace(response))
                 {
-                    await _botProvider.SendMessageAsync(chatId, response);
+                    await BotProvider.SendMessageAsync(chatId, response);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Chat {ChatId}: ошибка при обработке сообщения", chatId);
-                await _botProvider.SendMessageAsync(chatId,
+                await BotProvider.SendMessageAsync(chatId,
                     "Произошла ошибка при обработке сообщения 😔\nПопробуйте позже.");
             }
         }
@@ -91,10 +95,10 @@ namespace AgentBot.Handlers
 
                 // Здесь будет логика обработки inline-кнопок
                 // Пока просто подтверждаем получение
-                await _botProvider.SendMessageAsync(chatId, $"Получена команда: {data}");
+                await BotProvider.SendMessageAsync(chatId, $"Получена команда: {data}");
 
                 // Подтверждаем callback
-                // await _botProvider.AnswerCallbackQueryAsync(callbackQuery.Id);
+                // await BotProvider.AnswerCallbackQueryAsync(callbackQuery.Id);
             }
             catch (Exception ex)
             {

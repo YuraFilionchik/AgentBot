@@ -6,13 +6,14 @@ using System.Threading.Tasks;
 using AgentBot.Models;
 using AgentBot.Services;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using Telegram.Bot.Types;
 
 namespace AgentBot.Handlers
 {
     public class CommandHandler
     {
-        private readonly IBotProvider _botProvider;
+        private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<CommandHandler> _logger;
         private readonly List<IToolFunction> _tools;
         private readonly IAliasService _aliasService;
@@ -25,17 +26,18 @@ namespace AgentBot.Handlers
         private readonly DateTime _startTime = DateTime.UtcNow;
 
         public CommandHandler(
-            IBotProvider botProvider,
+            IServiceProvider serviceProvider,
             ILogger<CommandHandler> logger,
             IEnumerable<IToolFunction> tools,
             IAliasService aliasService,
             ICronTaskService cronTaskService)
         {
-            _botProvider = botProvider ?? throw new ArgumentNullException(nameof(botProvider));
+            _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _tools = tools?.ToList() ?? new List<IToolFunction>();
             _aliasService = aliasService ?? throw new ArgumentNullException(nameof(aliasService));
             _cronTaskService = cronTaskService ?? throw new ArgumentNullException(nameof(cronTaskService));
+
 
             _commandHandlers = new Dictionary<string, Func<Message, Task<string>>>(StringComparer.OrdinalIgnoreCase)
             {
@@ -52,6 +54,8 @@ namespace AgentBot.Handlers
                 ["/deletecron"]  = HandleDeleteCronAsync
             };
         }
+
+        private IBotProvider BotProvider => _serviceProvider.GetRequiredService<IBotProvider>();
 
         public void TrackMessage(long chatId)
         {
@@ -85,20 +89,20 @@ namespace AgentBot.Handlers
                 {
                     string response = await handler(message);
                     if (!string.IsNullOrWhiteSpace(response))
-                        await _botProvider.SendMessageAsync(chatId, response);
+                        await BotProvider.SendMessageAsync(chatId, response);
                     return true;
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Ошибка при выполнении команды {Command}", command);
-                    await _botProvider.SendMessageAsync(chatId,
+                    await BotProvider.SendMessageAsync(chatId,
                         "Произошла ошибка при обработке команды 😔\nПопробуйте позже или /help");
                     return true;
                 }
             }
 
             _logger.LogWarning("Неизвестная команда: {Command} от chatId={ChatId}", command, chatId);
-            await _botProvider.SendMessageAsync(chatId,
+            await BotProvider.SendMessageAsync(chatId,
                 "Неизвестная команда 🤔\nИспользуйте /help для списка доступных команд.");
             return false;
         }

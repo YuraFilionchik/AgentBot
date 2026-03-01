@@ -24,18 +24,18 @@ namespace AgentBot.Services
         public CronTaskRunner(
             ICronTaskService cronTaskService,
             IAiAgent aiAgent,
-            IBotProvider botProvider,
             IServiceProvider serviceProvider,
             ILogger<CronTaskRunner> logger,
             IEnumerable<IToolFunction> tools)
         {
             _cronTaskService = cronTaskService;
             _aiAgent = aiAgent;
-            _botProvider = botProvider;
             _serviceProvider = serviceProvider;
             _logger = logger;
             _tools = tools?.ToList() ?? new List<IToolFunction>();
         }
+
+        private IBotProvider BotProvider => _serviceProvider.GetRequiredService<IBotProvider>();
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -61,7 +61,7 @@ namespace AgentBot.Services
                                 _tools);
 
                             // Отправляем результат пользователю
-                            await _botProvider.SendMessageAsync(task.UserId,
+                            await BotProvider.SendMessageAsync(task.UserId,
                                 $"⏰ Результат задачи \"{task.Name}\":\n{response}");
 
                             // Отмечаем задачу как выполненную
@@ -72,9 +72,10 @@ namespace AgentBot.Services
                         catch (Exception ex)
                         {
                             _logger.LogError(ex, "Ошибка при выполнении задачи #{TaskId}", task.Id);
-                            await _botProvider.SendMessageAsync(task.UserId,
+                            await BotProvider.SendMessageAsync(task.UserId,
                                 $"⚠️ Ошибка при выполнении задачи \"{task.Name}\":\n{ex.Message}");
                         }
+
                     }
                 }
                 catch (Exception ex)

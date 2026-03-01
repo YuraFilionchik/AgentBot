@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AgentBot.Tools
 {
@@ -28,16 +29,19 @@ namespace AgentBot.Tools
             { "caption", "string" }       // Подпись к файлу (опционально)
         };
 
-        private readonly IBotProvider _botProvider;
+        private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<SendFileTool> _logger;
 
         public SendFileTool(
-            IBotProvider botProvider,
+            IServiceProvider serviceProvider,
             ILogger<SendFileTool> logger)
         {
-            _botProvider = botProvider;
+            _serviceProvider = serviceProvider;
             _logger = logger;
         }
+
+        private IBotProvider BotProvider => _serviceProvider.GetRequiredService<IBotProvider>();
+
 
         public async Task<string> ExecuteAsync(Dictionary<string, object> args)
         {
@@ -60,7 +64,7 @@ namespace AgentBot.Tools
                 {
                     byte[] fileBytes = Encoding.UTF8.GetBytes(content);
                     _logger.LogInformation("Отправка файла {FileName} в чат {ChatId} (из содержимого)", fileName, chatId);
-                    await _botProvider.SendFileAsync(chatId, fileBytes, fileName, caption);
+                    await BotProvider.SendFileAsync(chatId, fileBytes, fileName, caption);
 
                     return JsonSerializer.Serialize(new
                     {
@@ -76,7 +80,7 @@ namespace AgentBot.Tools
                 if (args.TryGetValue("file_path", out var pathObj) && pathObj is string filePath)
                 {
                     _logger.LogInformation("Отправка файла {FilePath} в чат {ChatId}", filePath, chatId);
-                    await _botProvider.SendFileFromPathAsync(chatId, filePath, caption);
+                    await BotProvider.SendFileFromPathAsync(chatId, filePath, caption);
 
                     return JsonSerializer.Serialize(new
                     {

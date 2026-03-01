@@ -37,7 +37,7 @@ namespace AgentBot.AiAgents
             var apiKey = configuration["AiAgent:ApiKey"]
                 ?? throw new ArgumentException("Gemini API key is not configured in appsettings.json");
 
-            _modelName = configuration["AiAgent:Model"] ?? "gemini-1.5-pro";
+            _modelName = configuration["AiAgent:Model"] ?? "gemini-2.5-flash";
             _client = new Client(apiKey: apiKey);
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _memory = memory ?? throw new ArgumentNullException(nameof(memory));

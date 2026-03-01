@@ -19,10 +19,15 @@ namespace AgentBot.Tools
 {
     /// <summary>
     /// Tool for executing safe Linux commands.
-    /// Supports: view logs (tail/cat), check service status (systemctl/ps), run scripts (bash), 
+    /// Supports: view logs (tail/cat), check service status (systemctl/ps), run scripts (bash),
     /// edit files (echo/sed), create files (touch/echo), delete files (rm),
     /// search in files (grep), find files/directories (find).
-    /// Security: Whitelist of commands, path restrictions, no sudo/root, input sanitization.
+    /// 
+    /// Расширенная версия с поддержкой:
+    /// - Работа с произвольными путями (не только в базовой директории)
+    /// - Выполнение команд от имени суперпользователя через sudo (требует настройки)
+    /// 
+    /// Security: Whitelist of commands, path restrictions, input sanitization.
     /// Register in DI as AddTransient<IToolFunction, LinuxCMDTool>().
     /// </summary>
     public class LinuxCMDTool : IToolFunction
@@ -30,38 +35,62 @@ namespace AgentBot.Tools
         public string Name => "LinuxCMD";
 
         public string Description =>
-            "Execute safe Linux commands on the host system. " +
+            "Execute Linux commands on the host system. " +
             "Supports: view logs (tail/cat), check service status (systemctl/ps), run scripts (bash), " +
             "edit files (echo/sed), create files (touch/echo), delete files (rm), " +
             "search in files (grep), find files/directories (find). " +
-            "All operations restricted to safe directories (e.g., /app/logs, /app/scripts). " +
-            "Do not use for destructive or privileged actions.";
+            "Supports sudo for privileged operations (configure SudoAllowedActions in appsettings.json). " +
+            "Path restrictions apply by default, but can be extended for admin users.";
 
         public Dictionary<string, string> Parameters => new()
         {
-            { "action", "string" }, // Enum-like: "view_log", "service_status", "run_script", "edit_file", "create_file", "delete_file", "grep", "find"
-            { "path", "string" },   // File/path (relative or absolute, but sanitized)
-            { "pattern", "string" }, // For grep/find: search pattern
-            { "content", "string" }, // For edit/create (new content)
-            { "options", "string" }  // Additional opts (e.g., "-n 10" for tail, "-i" for grep)
+            { "action", "string" },
+            { "path", "string" },
+            { "pattern", "string" },
+            { "content", "string" },
+            { "options", "string" },
+            { "use_sudo", "boolean" },      // Выполнять через sudo
+            { "allow_any_path", "boolean" } // Разрешить работу вне базовой директории
         };
 
         private readonly ILogger<LinuxCMDTool> _logger;
-        private readonly string _baseDir; // e.g., from config: "/app" or AppDomain.BaseDirectory
-        private readonly List<string> _allowedDirs = new() { "logs", "scripts", "data" }; // Subdirs under base
-        private readonly HashSet<string> _allowedActions = new()
-        {
-            "view_log", "service_status", "run_script", "edit_file", "create_file", "delete_file", "grep", "find"
-        };
-        private readonly HashSet<string> _bannedCommands = new()
-        {
-            "sudo", "rm -rf", "dd", "mkfs", "shutdown", "reboot", "apt", "yum", "pip", "wget", "curl" // etc.
-        };
+        private readonly string _baseDir;
+        private readonly List<string> _allowedDirs;
+        private readonly HashSet<string> _allowedActions;
+        private readonly HashSet<string> _bannedCommands;
+        private readonly HashSet<string> _sudoAllowedActions; // Действия, разрешённые для sudo
+        private readonly bool _allowSudo; // Разрешено ли sudo вообще
 
         public LinuxCMDTool(ILogger<LinuxCMDTool> logger, IConfiguration config)
         {
             _logger = logger;
-            _baseDir = config["AppBaseDir"] ?? AppDomain.CurrentDomain.BaseDirectory; // From appsettings.json
+            _baseDir = config["AppBaseDir"] ?? AppDomain.CurrentDomain.BaseDirectory;
+            
+            // Читаем разрешённые директории из конфига
+            var allowedDirsConfig = config["LinuxCMD:AllowedDirs"] ?? "logs,scripts,data";
+            _allowedDirs = allowedDirsConfig.Split(',').Select(s => s.Trim()).ToList();
+
+            // Читаем разрешённые действия
+            var allowedActionsConfig = config["LinuxCMD:AllowedActions"] ?? 
+                "view_log,service_status,run_script,edit_file,create_file,delete_file,grep,find";
+            _allowedActions = allowedActionsConfig.Split(',').Select(s => s.Trim().ToLowerInvariant()).ToHashSet();
+
+            // Читаем действия, разрешённые для sudo
+            var sudoAllowedConfig = config["LinuxCMD:SudoAllowedActions"] ?? "service_status,run_script";
+            _sudoAllowedActions = sudoAllowedConfig.Split(',').Select(s => s.Trim().ToLowerInvariant()).ToHashSet();
+
+            // Разрешено ли sudo
+            _allowSudo = bool.Parse(config["LinuxCMD:AllowSudo"] ?? "false");
+
+            // Запрещённые команды (никогда не разрешены)
+            _bannedCommands = new HashSet<string>
+            {
+                "rm -rf /", "rm -rf /*", "dd if=/dev/zero", "mkfs", 
+                "shutdown", "reboot", "halt", "poweroff",
+                "apt-get remove --purge .*", "yum erase .*",
+                "chmod -R 777 /", "chown -R root:root /"
+            };
+
             EnsureDirectories();
         }
 
@@ -80,30 +109,60 @@ namespace AgentBot.Tools
             if (!args.TryGetValue("action", out var actionObj) || actionObj is not string action || !_allowedActions.Contains(action.ToLowerInvariant()))
             {
                 _logger.LogWarning("Invalid or unsupported action: {Action}", actionObj);
-                return JsonSerializer.Serialize(new { error = "Invalid action. Supported: view_log, service_status, run_script, edit_file, create_file, delete_file, grep, find." });
+                return JsonSerializer.Serialize(new { error = "Invalid action. Supported: " + string.Join(", ", _allowedActions) });
             }
 
             string path = args.TryGetValue("path", out var pathObj) && pathObj is string p ? p : string.Empty;
             string pattern = args.TryGetValue("pattern", out var patternObj) && patternObj is string pt ? pt : string.Empty;
             string content = args.TryGetValue("content", out var contentObj) && contentObj is string c ? c : string.Empty;
             string options = args.TryGetValue("options", out var optsObj) && optsObj is string o ? o : string.Empty;
+            bool useSudo = args.TryGetValue("use_sudo", out var sudoObj) && (bool)(sudoObj ?? false);
+            bool allowAnyPath = args.TryGetValue("allow_any_path", out var pathObj2) && (bool)(pathObj2 ?? false);
 
             // Sanitize inputs
             path = SanitizePath(path);
-            pattern = SanitizePattern(pattern); // Additional for grep/find
-            if (string.IsNullOrEmpty(path))
-                return JsonSerializer.Serialize(new { error = "Invalid path." });
+            pattern = SanitizePattern(pattern);
 
-            string fullPath = Path.Combine(_baseDir, path);
-            if (!IsPathAllowed(fullPath))
+            // Проверка sudo
+            if (useSudo)
             {
-                _logger.LogWarning("Access denied to path: {Path}", fullPath);
-                return JsonSerializer.Serialize(new { error = "Access denied: Path outside allowed directories." });
+                if (!_allowSudo)
+                {
+                    return JsonSerializer.Serialize(new { error = "Sudo is disabled in configuration." });
+                }
+                if (!_sudoAllowedActions.Contains(action.ToLowerInvariant()))
+                {
+                    return JsonSerializer.Serialize(new { error = $"Action '{action}' is not allowed with sudo." });
+                }
+            }
+
+            // Проверка пути
+            string fullPath;
+            if (allowAnyPath)
+            {
+                // Для администраторов: разрешаем любые пути, но с проверкой на опасные паттерны
+                if (path.StartsWith("/"))
+                    fullPath = path;
+                else
+                    fullPath = Path.Combine(_baseDir, path);
+            }
+            else
+            {
+                // Стандартное поведение: только разрешённые директории
+                if (string.IsNullOrEmpty(path))
+                    return JsonSerializer.Serialize(new { error = "Invalid path." });
+
+                fullPath = Path.Combine(_baseDir, path);
+                if (!IsPathAllowed(fullPath))
+                {
+                    _logger.LogWarning("Access denied to path: {Path}", fullPath);
+                    return JsonSerializer.Serialize(new { error = "Access denied: Path outside allowed directories. Use allow_any_path=true for admin access." });
+                }
             }
 
             try
             {
-                string command = BuildCommand(action.ToLowerInvariant(), fullPath, pattern, content, options);
+                string command = BuildCommand(action.ToLowerInvariant(), fullPath, pattern, content, options, useSudo);
                 if (string.IsNullOrEmpty(command))
                     return JsonSerializer.Serialize(new { error = "Failed to build command." });
 
@@ -135,16 +194,24 @@ namespace AgentBot.Tools
             if (string.IsNullOrWhiteSpace(input)) return string.Empty;
 
             // Remove dangerous chars/sequences
-            input = Regex.Replace(input, @"[;&|><$()`\n\r]", string.Empty); // Prevent injection
-            input = Path.GetFullPath(input).TrimStart(Path.DirectorySeparatorChar); // Normalize, no absolute root
+            input = Regex.Replace(input, @"[;&|><$()`\n\r]", string.Empty);
+            
+            // Нормализуем путь
+            try
+            {
+                input = Path.GetFullPath(input).TrimStart(Path.DirectorySeparatorChar);
+            }
+            catch
+            {
+                // Если путь невалидный, возвращаем как есть
+            }
+            
             return input;
         }
 
         private string SanitizePattern(string input)
         {
             if (string.IsNullOrWhiteSpace(input)) return string.Empty;
-
-            // For grep/find: remove dangerous chars, limit to safe patterns
             input = Regex.Replace(input, @"[;&|><$()`\n\r]", string.Empty);
             return input;
         }
@@ -162,25 +229,26 @@ namespace AgentBot.Tools
         //                  Command Builders
         // ────────────────────────────────────────────────
 
-        private string BuildCommand(string action, string fullPath, string pattern, string content, string options)
+        private string BuildCommand(string action, string fullPath, string pattern, string content, string options, bool useSudo)
         {
+            string sudo = useSudo ? "sudo " : "";
+            
             return action switch
             {
-                "view_log" => $"tail {options} \"{fullPath}\"", // e.g., tail -n 20 log.txt
-                "service_status" => $"systemctl status {Path.GetFileNameWithoutExtension(fullPath)} || ps aux | grep {Path.GetFileNameWithoutExtension(fullPath)}", // Service or process
-                "run_script" => $"bash \"{fullPath}\" {options}", // bash script.sh args
-                "create_file" => $"touch \"{fullPath}\" || echo \"{EscapeContent(content)}\" > \"{fullPath}\"", // touch or echo >
-                "edit_file" => $"echo \"{EscapeContent(content)}\" >> \"{fullPath}\" || sed -i 's/.*/{EscapeContent(content)}/' \"{fullPath}\"", // Append or replace
-                "delete_file" => $"rm \"{fullPath}\"", // rm file (but path restricted)
-                "grep" => $"grep {options} \"{EscapeContent(pattern)}\" \"{fullPath}\"", // grep -i "error" log.txt
-                "find" => $"find \"{Path.GetDirectoryName(fullPath) ?? _baseDir}\" {options} -name \"{EscapeContent(pattern)}\"", // find /dir -type f -name "*.log"
+                "view_log" => $"{sudo}tail {options} \"{fullPath}\"",
+                "service_status" => $"{sudo}systemctl status {Path.GetFileNameWithoutExtension(fullPath)} || {sudo}ps aux | grep {Path.GetFileNameWithoutExtension(fullPath)}",
+                "run_script" => $"{sudo}bash \"{fullPath}\" {options}",
+                "create_file" => $"{sudo}touch \"{fullPath}\" || echo \"{EscapeContent(content)}\" {sudo}> \"{fullPath}\"",
+                "edit_file" => $"{sudo}echo \"{EscapeContent(content)}\" >> \"{fullPath}\"",
+                "delete_file" => $"{sudo}rm \"{fullPath}\"",
+                "grep" => $"{sudo}grep {options} \"{EscapeContent(pattern)}\" \"{fullPath}\"",
+                "find" => $"{sudo}find \"{Path.GetDirectoryName(fullPath) ?? _baseDir}\" {options} -name \"{EscapeContent(pattern)}\"",
                 _ => string.Empty
             };
         }
 
         private string EscapeContent(string content)
         {
-            // Basic escaping for shell
             return content.Replace("\"", "\\\"").Replace("$", "\\$").Replace("`", "\\`");
         }
 

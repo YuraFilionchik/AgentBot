@@ -19,11 +19,10 @@ namespace AgentBot
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("BotWorker started.");
-            await _botProvider.StartPollingAsync();
+            await _botProvider.StartPollingAsync(stoppingToken);
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                // Опционально: Дополнительная логика, если нужно
                 await Task.Delay(1000, stoppingToken);
             }
 

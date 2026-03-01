@@ -7,6 +7,9 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
 
+using Polly;
+using Polly.Retry;
+
 namespace AgentBot.Tools
 {
     /// <summary>
@@ -27,12 +30,16 @@ namespace AgentBot.Tools
         private readonly HttpClient _httpClient;
         private readonly ILogger<WeatherTool> _logger;
         private readonly string _apiKey; // From config or secrets
+        private readonly AsyncRetryPolicy _retryPolicy;
 
         public WeatherTool(IHttpClientFactory httpClientFactory, ILogger<WeatherTool> logger, IConfiguration config)
         {
             _httpClient = httpClientFactory.CreateClient();
             _logger = logger;
             _apiKey = config["WeatherApiKey"] ?? throw new ArgumentException("Weather API key not configured.");
+            
+            // Инициализация политики ретраев
+            _retryPolicy = AgentBot.Infrastructure.RetryPolicies.CreateDefaultRetryPolicy(logger, "Weather API");
         }
 
         public async Task<string> ExecuteAsync(Dictionary<string, object> args)
@@ -46,7 +53,10 @@ namespace AgentBot.Tools
             try
             {
                 string url = $"https://api.openweathermap.org/data/2.5/weather?q={Uri.EscapeDataString(city)}&appid={_apiKey}&units=metric";
-                var response = await _httpClient.GetAsync(url);
+                var response = await _retryPolicy.ExecuteAsync(async () => 
+                {
+                    return await _httpClient.GetAsync(url);
+                });
                 response.EnsureSuccessStatusCode();
                 string content = await response.Content.ReadAsStringAsync();
 

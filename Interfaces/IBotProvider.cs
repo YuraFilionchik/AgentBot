@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace AgentBot
@@ -11,12 +12,22 @@ namespace AgentBot
         /// <summary>
         /// Запускает получение входящих сообщений (polling / webhook).
         /// </summary>
-        Task StartPollingAsync();
+        Task StartPollingAsync(CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Отправляет текстовое сообщение в указанный чат.
         /// </summary>
-        Task SendMessageAsync(long chatId, string text);
+        Task SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Отправляет файл в указанный чат.
+        /// </summary>
+        Task SendFileAsync(long chatId, byte[] fileContent, string fileName, string? caption = null, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Отправляет файл из файловой системы.
+        /// </summary>
+        Task SendFileFromPathAsync(long chatId, string filePath, string? caption = null, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Колбек, вызываемый при получении входящего сообщения.

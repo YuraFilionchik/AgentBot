@@ -12,6 +12,6 @@ namespace AgentBot
         /// Обрабатывает входящее сообщение, взаимодействует с API ИИ
         /// (с поддержкой tool-функций) и возвращает текстовый ответ.
         /// </summary>
-        Task<string> ProcessMessageAsync(string message, List<IToolFunction> tools);
+        Task<string> ProcessMessageAsync(long chatId, string message, List<IToolFunction> tools);
     }
 }

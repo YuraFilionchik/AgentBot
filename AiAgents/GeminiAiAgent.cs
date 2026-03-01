@@ -8,50 +8,83 @@ using Google.GenAI.Types;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using AgentBot.Memory;
+using AgentBot.Services;
 
 namespace AgentBot.AiAgents
 {
     /// <summary>
     /// Реализация IAiAgent для Google Gemini (официальный SDK Google.GenAI v1.2+)
-    /// Исправлены все ошибки компиляции, точная сигнатура интерфейса, правильные типы SDK.
+    /// Использует IConversationMemory для хранения истории чатов.
+    /// Использует ILlmWrapper для формирования контекста пользователя.
     /// </summary>
     public class GeminiAiAgent : IAiAgent
     {
         private readonly Client _client;
         private readonly string _modelName;
         private readonly ILogger<GeminiAiAgent> _logger;
-
-        // Общая история чата (для начала достаточно одной сессии).
-        // При необходимости можно заменить на ConcurrentDictionary<long, List<Content>>
-        private readonly List<Content> _history = new();
-
+        private readonly IConversationMemory _memory;
+        private readonly ILlmWrapper _llmWrapper;
         private readonly int _maxToolIterations = 10;
 
-        public GeminiAiAgent(IConfiguration configuration, ILogger<GeminiAiAgent> logger)
+        public GeminiAiAgent(
+            IConfiguration configuration,
+            ILogger<GeminiAiAgent> logger,
+            IConversationMemory memory,
+            ILlmWrapper llmWrapper)
         {
             var apiKey = configuration["AiAgent:ApiKey"]
                 ?? throw new ArgumentException("Gemini API key is not configured in appsettings.json");
 
             _modelName = configuration["AiAgent:Model"] ?? "gemini-1.5-pro";
-
             _client = new Client(apiKey: apiKey);
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _memory = memory ?? throw new ArgumentNullException(nameof(memory));
+            _llmWrapper = llmWrapper ?? throw new ArgumentNullException(nameof(llmWrapper));
         }
 
-        // ТОЧНАЯ сигнатура интерфейса IAiAgent
-        public async Task<string> ProcessMessageAsync(string message, List<IToolFunction> tools)
+        public async Task<string> ProcessMessageAsync(long chatId, string message, List<IToolFunction> tools)
         {
             if (string.IsNullOrWhiteSpace(message))
                 return "Пустое сообщение. Напишите что-нибудь!";
 
-            _logger.LogInformation("Gemini ← {Message}", message);
+            _logger.LogInformation("Chat {ChatId}: Gemini ← {Message}", chatId, message);
+
+            // Формируем контекст пользователя
+            var userContext = await _llmWrapper.BuildUserContextAsync(chatId, null, "user");
+            userContext.AvailableTools.AddRange(tools.Select(t => new ToolInfo
+            {
+                Name = t.Name,
+                Description = t.Description,
+                Parameters = t.Parameters
+            }));
+
+            // Формируем системный промпт
+            string systemPrompt = await _llmWrapper.BuildSystemPromptAsync(userContext);
+
+            // Преобразуем сообщение с учётом алиасов
+            string processedMessage = await _llmWrapper.BuildUserMessageAsync(chatId, message);
+
+            // Получаем историю чата
+            var history = await _memory.GetHistoryAsync(chatId, 20);
+
+            // Добавляем системный промпт как первое сообщение (если история пуста)
+            if (history.Count == 0)
+            {
+                history.Add(new Content
+                {
+                    Role = "user",
+                    Parts = { new Part { Text = systemPrompt } }
+                });
+            }
 
             // Добавляем сообщение пользователя в историю
-            _history.Add(new Content
+            var userContent = new Content
             {
                 Role = "user",
-                Parts = { new Part { Text = message } }
-            });
+                Parts = { new Part { Text = processedMessage } }
+            };
+            history.Add(userContent);
 
             // Подготовка инструментов
             var functionDeclarations = tools.Select(ConvertToFunctionDeclaration).ToList();
@@ -77,7 +110,7 @@ namespace AgentBot.AiAgents
 
                     var response = await _client.Models.GenerateContentAsync(
                         model: _modelName,
-                        contents: _history,
+                        contents: history,
                         config: config);
 
                     var candidate = response.Candidates?.FirstOrDefault();
@@ -91,9 +124,10 @@ namespace AgentBot.AiAgents
                     if (textPart != null)
                     {
                         string finalAnswer = textPart.Text!;
-                        _logger.LogInformation("Gemini → {Answer}", finalAnswer);
+                        _logger.LogInformation("Chat {ChatId}: Gemini → {Answer}", chatId, finalAnswer);
 
-                        _history.Add(content);
+                        // Сохраняем ответ в историю
+                        await _memory.AddMessageAsync(chatId, content);
                         return finalAnswer;
                     }
 
@@ -105,14 +139,15 @@ namespace AgentBot.AiAgents
                     if (!functionCallParts.Any())
                         return "Gemini не смог сгенерировать ответ.";
 
-                    _history.Add(content); // сохраняем вызовы
+                    // Сохраняем вызов функции в историю
+                    await _memory.AddMessageAsync(chatId, content);
 
                     var toolResponseParts = new List<Part>();
 
                     foreach (var part in functionCallParts)
                     {
                         var fc = part.FunctionCall!;
-                        _logger.LogInformation("Gemini вызвал функцию: {Name}", fc.Name);
+                        _logger.LogInformation("Chat {ChatId}: Gemini вызвал функцию: {Name}", chatId, fc.Name);
 
                         var toolFunc = tools.FirstOrDefault(t => t.Name.Equals(fc.Name, StringComparison.OrdinalIgnoreCase));
                         if (toolFunc == null)
@@ -138,17 +173,20 @@ namespace AgentBot.AiAgents
                     }
 
                     // Добавляем результаты инструментов в историю
-                    _history.Add(new Content
+                    var toolResponseContent = new Content
                     {
                         Role = "user",
                         Parts = toolResponseParts
-                    });
+                    };
+                    await _memory.AddMessageAsync(chatId, toolResponseContent);
 
+                    // Обновляем историю для следующего цикла
+                    history = await _memory.GetHistoryAsync(chatId, 20);
                     iteration++;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Ошибка при вызове Gemini");
+                    _logger.LogError(ex, "Chat {ChatId}: Ошибка при вызове Gemini", chatId);
                     return "Произошла ошибка при обращении к ИИ 😔 Попробуйте позже.";
                 }
             }

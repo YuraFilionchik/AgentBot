@@ -1,8 +1,8 @@
-using AgentBot;
 using AgentBot.Handlers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Telegram.Bot;
@@ -18,9 +18,12 @@ namespace AgentBot.Bots
         private readonly MessageProcessor _processor;
         private readonly ILogger<TelegramBotProvider> _logger;
 
-        public Func<long, string, Task>? OnMessageReceived { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+        public Func<long, string, Task>? OnMessageReceived { get; set; }
 
-        public TelegramBotProvider(IConfiguration configuration, MessageProcessor processor, ILogger<TelegramBotProvider> logger)
+        public TelegramBotProvider(
+            IConfiguration configuration,
+            MessageProcessor processor,
+            ILogger<TelegramBotProvider> logger)
         {
             var token = configuration["Bots:Telegram:ApiToken"];
             if (string.IsNullOrEmpty(token))
@@ -37,7 +40,7 @@ namespace AgentBot.Bots
         {
             var receiverOptions = new ReceiverOptions
             {
-                AllowedUpdates = new[] { UpdateType.Message }
+                AllowedUpdates = new[] { UpdateType.Message, UpdateType.CallbackQuery }
             };
 
             _client.StartReceiving(HandleUpdateAsync, HandlePollingErrorAsync, receiverOptions, cancellationToken);
@@ -56,6 +59,12 @@ namespace AgentBot.Bots
                     _logger.LogDebug("Received message from chat {ChatId}: {MessageText}", update.Message.Chat.Id, update.Message.Text);
                     await _processor.ProcessAsync(update.Message);
                 }
+                else if (update.CallbackQuery != null)
+                {
+                    // Обработка inline-кнопок
+                    _logger.LogDebug("Received callback query from chat {ChatId}: {Data}", update.CallbackQuery.From.Id, update.CallbackQuery.Data);
+                    await _processor.HandleCallbackAsync(update.CallbackQuery);
+                }
             }
             catch (Exception ex)
             {
@@ -66,10 +75,7 @@ namespace AgentBot.Bots
         private Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
         {
             _logger.LogError(exception, "Telegram polling error occurred.");
-
-            // Простой ретрай: задержка перед следующим попыткой (встроено в StartReceiving, но логируем)
-            // Для продвинутых ретраев можно использовать Polly, но здесь базово
-            return Task.CompletedTask; // Продолжаем polling
+            return Task.CompletedTask;
         }
 
         public async Task SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default)
@@ -82,18 +88,55 @@ namespace AgentBot.Bots
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error sending message to chat {ChatId}", chatId);
-                // Ретрай: можно добавить Polly здесь для повторных попыток
             }
         }
 
-        public Task StartPollingAsync()
+        public async Task SendFileAsync(long chatId, byte[] fileContent, string fileName, string? caption = null, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            try
+            {
+                using var stream = new MemoryStream(fileContent);
+                var file = new InputFile(stream, fileName);
+
+                await _client.SendDocument(
+                    chatId: new ChatId(chatId),
+                    document: file,
+                    caption: caption,
+                    cancellationToken: cancellationToken);
+
+                _logger.LogDebug("Sent file {FileName} to chat {ChatId}", fileName, chatId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending file {FileName} to chat {ChatId}", fileName, chatId);
+            }
         }
 
-        public Task SendMessageAsync(long chatId, string text)
+        public async Task SendFileFromPathAsync(long chatId, string filePath, string? caption = null, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            try
+            {
+                if (!File.Exists(filePath))
+                {
+                    throw new FileNotFoundException($"File not found: {filePath}");
+                }
+
+                await using var stream = File.OpenRead(filePath);
+                var fileName = Path.GetFileName(filePath);
+                var file = new InputFile(stream, fileName);
+
+                await _client.SendDocument(
+                    chatId: new ChatId(chatId),
+                    document: file,
+                    caption: caption,
+                    cancellationToken: cancellationToken);
+
+                _logger.LogDebug("Sent file {FileName} to chat {ChatId}", fileName, chatId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending file {FilePath} to chat {ChatId}", filePath, chatId);
+            }
         }
     }
 }

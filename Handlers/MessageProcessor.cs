@@ -10,7 +10,7 @@ namespace AgentBot.Handlers
     /// Процессор сообщений: маршрутизирует входящие сообщения
     /// между CommandHandler (для команд) и IAiAgent (для обычных сообщений).
     /// </summary>
-    internal class MessageProcessor
+    public class MessageProcessor
     {
         private readonly CommandHandler _commandHandler;
         private readonly IAiAgent _aiAgent;

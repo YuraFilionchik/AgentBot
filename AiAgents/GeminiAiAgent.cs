@@ -10,6 +10,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using AgentBot.Memory;
 using AgentBot.Services;
+using Type = Google.GenAI.Types.Type;
 
 namespace AgentBot.AiAgents
 {
@@ -152,24 +153,24 @@ namespace AgentBot.AiAgents
                         var toolFunc = tools.FirstOrDefault(t => t.Name.Equals(fc.Name, StringComparison.OrdinalIgnoreCase));
                         if (toolFunc == null)
                         {
-                            toolResponseParts.Add(CreateErrorResponse(fc.Name, "Tool not found"));
+                            _logger.LogWarning("Chat {ChatId}: Tool not found: {Name}", chatId, fc.Name);
                             continue;
                         }
 
-                        var args = fc.Args?.Fields?.ToDictionary(
-                            kvp => kvp.Key,
-                            kvp => ValueToObject(kvp.Value)) ?? new Dictionary<string, object>();
+                        var args = fc.Args ?? new Dictionary<string, object>();
 
                         string resultJson = await toolFunc.ExecuteAsync(args);
 
-                        toolResponseParts.Add(new Part
+                        var responsePart = new Part
                         {
                             FunctionResponse = new FunctionResponse
                             {
                                 Name = fc.Name,
-                                Response = JsonToStruct(resultJson)
+                                Response = JsonToDict(resultJson)
                             }
-                        });
+                        };
+
+                        toolResponseParts.Add(responsePart);
                     }
 
                     // Добавляем результаты инструментов в историю
@@ -228,27 +229,44 @@ namespace AgentBot.AiAgents
             _ => Google.GenAI.Types.Type.String
         };
 
-        private static Part CreateErrorResponse(string name, string errorMsg) =>
-            new Part
-            {
-                FunctionResponse = new FunctionResponse
-                {
-                    Name = name,
-                    Response = JsonToStruct(JsonSerializer.Serialize(new { error = errorMsg }))
-                }
-            };
-
         private static Struct JsonToStruct(string json)
         {
             if (string.IsNullOrWhiteSpace(json)) return new Struct();
 
-            var doc = JsonDocument.Parse(json);
-            var s = new Struct();
-            foreach (var prop in doc.RootElement.EnumerateObject())
+            try
             {
-                s.Fields[prop.Name] = JsonElementToValue(prop.Value);
+                var doc = JsonDocument.Parse(json);
+                var s = new Struct();
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    s.Fields.Add(prop.Name, JsonElementToValue(prop.Value));
+                }
+                return s;
             }
-            return s;
+            catch
+            {
+                return new Struct();
+            }
+        }
+
+        private static Dictionary<string, object> JsonToDict(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return new Dictionary<string, object>();
+
+            try
+            {
+                var doc = JsonDocument.Parse(json);
+                var dict = new Dictionary<string, object>();
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    dict[prop.Name] = JsonElementToValue(prop.Value);
+                }
+                return dict;
+            }
+            catch
+            {
+                return new Dictionary<string, object>();
+            }
         }
 
         private static Value JsonElementToValue(JsonElement e) => e.ValueKind switch
@@ -261,13 +279,17 @@ namespace AgentBot.AiAgents
             _ => Value.ForString(e.ToString())
         };
 
-        private static object ValueToObject(Value v) => v.KindCase switch
+        private static object ValueToObject(Value v) 
         {
-            Value.KindOneofCase.StringValue => v.StringValue,
-            Value.KindOneofCase.NumberValue => v.NumberValue,
-            Value.KindOneofCase.BoolValue => v.BoolValue,
-            Value.KindOneofCase.NullValue => null!,
-            _ => v.ToString() ?? string.Empty
-        };
+            if (v == null) return string.Empty;
+            return v.KindCase switch
+            {
+                Value.KindOneofCase.StringValue => v.StringValue ?? string.Empty,
+                Value.KindOneofCase.NumberValue => v.NumberValue,
+                Value.KindOneofCase.BoolValue => v.BoolValue,
+                Value.KindOneofCase.NullValue => null!,
+                _ => v.ToString() ?? string.Empty
+            };
+        }
     }
 }

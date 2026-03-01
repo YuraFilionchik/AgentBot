@@ -43,11 +43,15 @@ namespace AgentBot.Bots
                 AllowedUpdates = new[] { UpdateType.Message, UpdateType.CallbackQuery }
             };
 
-            _client.StartReceiving(HandleUpdateAsync, HandlePollingErrorAsync, receiverOptions, cancellationToken);
-
             _logger.LogInformation("Telegram polling started.");
             var me = await _client.GetMe(cancellationToken);
             _logger.LogInformation("Bot connected: {BotName}", me.Username);
+
+            _client.StartReceiving(
+                updateHandler: (botClient, update, token) => HandleUpdateAsync(botClient, update, token),
+                errorHandler: (botClient, exception, errorSource, token) => HandleErrorAsync(botClient, exception, errorSource, token),
+                receiverOptions: receiverOptions,
+                cancellationToken: cancellationToken);
         }
 
         private async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
@@ -72,9 +76,9 @@ namespace AgentBot.Bots
             }
         }
 
-        private Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
+        private Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, HandleErrorSource errorSource, CancellationToken cancellationToken)
         {
-            _logger.LogError(exception, "Telegram polling error occurred.");
+            _logger.LogError(exception, "Telegram error from {ErrorSource}", errorSource);
             return Task.CompletedTask;
         }
 
@@ -96,7 +100,7 @@ namespace AgentBot.Bots
             try
             {
                 using var stream = new MemoryStream(fileContent);
-                var file = new InputFile(stream, fileName);
+                var file = InputFile.FromStream(stream, fileName);
 
                 await _client.SendDocument(
                     chatId: new ChatId(chatId),
@@ -123,7 +127,7 @@ namespace AgentBot.Bots
 
                 await using var stream = File.OpenRead(filePath);
                 var fileName = Path.GetFileName(filePath);
-                var file = new InputFile(stream, fileName);
+                var file = InputFile.FromStream(stream, fileName);
 
                 await _client.SendDocument(
                     chatId: new ChatId(chatId),

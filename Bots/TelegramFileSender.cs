@@ -52,7 +52,7 @@ namespace AgentBot.Bots
             try
             {
                 using var stream = new MemoryStream(fileContent);
-                var file = new InputFile(stream, fileName);
+                var file = InputFile.FromStream(stream, fileName);
 
                 await _client.SendDocument(
                     chatId: new ChatId(chatId),
@@ -80,7 +80,7 @@ namespace AgentBot.Bots
 
                 await using var stream = File.OpenRead(filePath);
                 var fileName = Path.GetFileName(filePath);
-                var file = new InputFile(stream, fileName);
+                var file = InputFile.FromStream(stream, fileName);
 
                 await _client.SendDocument(
                     chatId: new ChatId(chatId),

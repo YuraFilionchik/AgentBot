@@ -10,7 +10,7 @@ namespace AgentBot.Tools
 {
     public static class DatabaseHelper
     {
-        private static string _connectionString;
+        private static string? _connectionString;
 
         public static void Initialize(IConfiguration configuration)
         {

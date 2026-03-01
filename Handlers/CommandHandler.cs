@@ -144,7 +144,6 @@ namespace AgentBot.Handlers
             "🌤 /weather <город> — погода\n" +
             "📝 /note <текст> — сохранить заметку\n\n" +
             "Просто пиши вопросы — отвечу через ИИ-агент ✨");
-        }
 
         private Task<string> HandleAboutAsync(Message message) => Task.FromResult(
             "🤖 Этот бот создан на .NET 9 (Worker Service)\n" +

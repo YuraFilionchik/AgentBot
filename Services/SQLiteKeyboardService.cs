@@ -95,8 +95,7 @@ namespace AgentBot.Services
             var markup = new ReplyKeyboardMarkup(keyboard)
             {
                 ResizeKeyboard = true,
-                OneTimeKeyboard = false,
-                Persistent = true
+                OneTimeKeyboard = false
             };
 
             return Task.FromResult(markup);

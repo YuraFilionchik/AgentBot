@@ -4,6 +4,7 @@ using AgentBot.Bots;
 using AgentBot.Handlers;
 using AgentBot.Memory;
 using AgentBot.Models;
+using AgentBot.Security;
 using AgentBot.Services;
 using AgentBot.Tools;
 using Microsoft.Extensions.Configuration;
@@ -47,6 +48,9 @@ builder.Services.AddSingleton<IAiAgent, GeminiAiAgent>();
 // Обработчики
 builder.Services.AddSingleton<CommandHandler>();
 builder.Services.AddSingleton<MessageProcessor>();
+
+// Безопасность и контроль доступа
+builder.Services.AddSingleton<AccessControlService>();
 
 // Инструменты (Tools)
 builder.Services.AddHttpClient();

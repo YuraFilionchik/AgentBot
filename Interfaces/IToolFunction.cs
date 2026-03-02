@@ -26,6 +26,8 @@ namespace AgentBot
         /// <summary>
         /// Выполняет функцию с указанными аргументами и возвращает результат (строка или JSON).
         /// </summary>
-        Task<string> ExecuteAsync(Dictionary<string, object> args);
+        /// <param name="args">Аргументы функции</param>
+        /// <param name="chatId">ID чата для проверки прав доступа (опционально)</param>
+        Task<string> ExecuteAsync(Dictionary<string, object> args, long chatId = default);
     }
 }

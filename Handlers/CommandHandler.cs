@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using AgentBot.Models;
+using AgentBot.Security;
 using AgentBot.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,6 +20,7 @@ namespace AgentBot.Handlers
         private readonly List<IToolFunction> _tools;
         private readonly IAliasService _aliasService;
         private readonly ICronTaskService _cronTaskService;
+        private readonly AccessControlService _accessControl;
 
         private readonly Dictionary<string, Func<Message, Task<string>>> _commandHandlers;
 
@@ -30,13 +33,15 @@ namespace AgentBot.Handlers
             ILogger<CommandHandler> logger,
             IEnumerable<IToolFunction> tools,
             IAliasService aliasService,
-            ICronTaskService cronTaskService)
+            ICronTaskService cronTaskService,
+            AccessControlService accessControl)
         {
             _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _tools = tools?.ToList() ?? new List<IToolFunction>();
             _aliasService = aliasService ?? throw new ArgumentNullException(nameof(aliasService));
             _cronTaskService = cronTaskService ?? throw new ArgumentNullException(nameof(cronTaskService));
+            _accessControl = accessControl ?? throw new ArgumentNullException(nameof(accessControl));
 
 
             _commandHandlers = new Dictionary<string, Func<Message, Task<string>>>(StringComparer.OrdinalIgnoreCase)
@@ -51,7 +56,9 @@ namespace AgentBot.Handlers
                 ["/listaliases"] = HandleListAliasesAsync,
                 ["/cron"]        = HandleCronAsync,
                 ["/listcrons"]   = HandleListCronsAsync,
-                ["/deletecron"]  = HandleDeleteCronAsync
+                ["/deletecron"]  = HandleDeleteCronAsync,
+                ["/register"]    = HandleRegisterAsync,
+                ["/restart"]     = HandleRestartAsync
             };
         }
 
@@ -175,12 +182,94 @@ namespace AgentBot.Handlers
         {
             long chatId = message.Chat.Id;
             string username = message.From?.Username != null ? $"@{message.From.Username}" : "—";
+            string role = _accessControl.IsAdmin(chatId) ? "👑 Администратор" : "👤 Пользователь";
             return Task.FromResult(
                 $"🪪 Ваша информация:\n\n" +
                 $"Chat ID: `{chatId}`\n" +
                 $"Username: {username}\n" +
                 $"Имя: {message.From?.FirstName} {message.From?.LastName}\n" +
-                $"Роль: 👤 Пользователь");
+                $"Роль: {role}");
+        }
+
+        private async Task<string> HandleRegisterAsync(Message message)
+        {
+            long chatId = message.Chat.Id;
+            string password = ExtractArgument(message.Text!);
+
+            if (string.IsNullOrWhiteSpace(password))
+            {
+                return "🔑 Регистрация администратора:\n\n" +
+                       "Использование: /register <пароль>\n\n" +
+                       "Введите пароль администратора для получения расширенных прав.\n" +
+                       "После успешной регистрации вы сможете:\n" +
+                       "• Выполнять команды с sudo\n" +
+                       "• Работать с произвольными путями в системе\n" +
+                       "• Управлять сервисами и процессами";
+            }
+
+            var result = await _accessControl.TryRegisterAdminAsync(chatId, password);
+            return result switch
+            {
+                RegisterResult.Success => "✅ Вы успешно зарегистрированы как администратор!\n" +
+                                          "Теперь вы можете выполнять команды с повышенными привилегиями.",
+                RegisterResult.AlreadyAdmin => "⚠️ Вы уже являетесь администратором.",
+                RegisterResult.WrongPassword => "❌ Неверный пароль администратора.",
+                _ => "❌ Ошибка при регистрации."
+            };
+        }
+
+        private async Task<string> HandleRestartAsync(Message message)
+        {
+            long chatId = message.Chat.Id;
+
+            // Проверка прав администратора
+            if (!_accessControl.IsAdmin(chatId))
+            {
+                return "❌ Доступ запрещён. Команда /restart доступна только администраторам.\n" +
+                       "Используйте /register для получения прав администратора.";
+            }
+
+            // Запускаем перезагрузку в фоне
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(1000);
+                try
+                {
+                    // Попытка перезапуска через systemctl (для Linux)
+                    var startInfo = new ProcessStartInfo
+                    {
+                        FileName = "systemctl",
+                        Arguments = "restart agentbot",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false
+                    };
+
+                    using var process = Process.Start(startInfo);
+                    if (process != null)
+                    {
+                        await process.WaitForExitAsync();
+                        if (process.ExitCode == 0)
+                        {
+                            _logger.LogInformation("Бот перезапущен через systemctl");
+                            return;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Если systemctl недоступен, просто завершаем процесс
+                    // systemd или docker автоматически перезапустит контейнер
+                }
+
+                // Аварийное завершение процесса
+                _logger.LogWarning("Перезагрузка через завершение процесса");
+                Environment.Exit(0);
+            });
+
+            return "🔄 Перезагрузка бота...\n\n" +
+                   "Бот будет перезапущен в течение нескольких секунд.\n" +
+                   "Если бот не запустился автоматически — проверьте логи.";
         }
 
         // ────────────────────────────────────────────────

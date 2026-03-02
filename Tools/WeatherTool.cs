@@ -1,5 +1,6 @@
 
 using AgentBot;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
@@ -42,7 +43,7 @@ namespace AgentBot.Tools
             _retryPolicy = AgentBot.Infrastructure.RetryPolicies.CreateDefaultRetryPolicy(logger, "Weather API");
         }
 
-        public async Task<string> ExecuteAsync(Dictionary<string, object> args)
+        public async Task<string> ExecuteAsync(Dictionary<string, object> args, long chatId = default)
         {
             if (!args.TryGetValue("city", out var cityObj) || cityObj is not string city || string.IsNullOrWhiteSpace(city))
             {

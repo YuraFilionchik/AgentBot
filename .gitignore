@@ -361,5 +361,9 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
-#appsettings.json
-#/appsettings.json
+
+# Local settings (contains secrets like API tokens)
+appsettings.Local.json
+
+# Docker environment file (contains secrets)
+.env

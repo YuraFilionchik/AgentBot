@@ -56,7 +56,7 @@ namespace AgentBot.Tools
             { "content", "string" }
         };
 
-        public async Task<string> ExecuteAsync(Dictionary<string, object> args)
+        public async Task<string> ExecuteAsync(Dictionary<string, object> args, long chatId = default)
         {
             if (!args.TryGetValue("user_id", out var userIdObj) || !args.TryGetValue("content", out var contentObj))
                 return JsonSerializer.Serialize(new { error = "Missing user_id or content." });
@@ -90,7 +90,7 @@ namespace AgentBot.Tools
             { "note_id", "number" }
         };
 
-        public async Task<string> ExecuteAsync(Dictionary<string, object> args)
+        public async Task<string> ExecuteAsync(Dictionary<string, object> args, long chatId = default)
         {
             if (!args.TryGetValue("user_id", out var userIdObj) || !args.TryGetValue("note_id", out var noteIdObj))
                 return JsonSerializer.Serialize(new { error = "Missing user_id or note_id." });
@@ -135,7 +135,7 @@ namespace AgentBot.Tools
             { "user_id", "string" }
         };
 
-        public async Task<string> ExecuteAsync(Dictionary<string, object> args)
+        public async Task<string> ExecuteAsync(Dictionary<string, object> args, long chatId = default)
         {
             if (!args.TryGetValue("user_id", out var userIdObj))
                 return JsonSerializer.Serialize(new { error = "Missing user_id." });
@@ -179,7 +179,7 @@ namespace AgentBot.Tools
             { "note_id", "number" }
         };
 
-        public async Task<string> ExecuteAsync(Dictionary<string, object> args)
+        public async Task<string> ExecuteAsync(Dictionary<string, object> args, long chatId = default)
         {
             if (!args.TryGetValue("user_id", out var userIdObj) || !args.TryGetValue("note_id", out var noteIdObj))
                 return JsonSerializer.Serialize(new { error = "Missing user_id or note_id." });

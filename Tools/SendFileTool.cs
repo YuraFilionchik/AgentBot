@@ -43,7 +43,7 @@ namespace AgentBot.Tools
         private IBotProvider BotProvider => _serviceProvider.GetRequiredService<IBotProvider>();
 
 
-        public async Task<string> ExecuteAsync(Dictionary<string, object> args)
+        public async Task<string> ExecuteAsync(Dictionary<string, object> args, long toolChatId = default)
         {
             try
             {

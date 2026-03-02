@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using AgentBot;
+using AgentBot.Security;
 using Microsoft.Extensions.Logging;
 
 namespace AgentBot.Services
@@ -36,11 +37,16 @@ namespace AgentBot.Services
     {
         private readonly IAliasService _aliasService;
         private readonly ILogger<LlmWrapper> _logger;
+        private readonly AccessControlService _accessControl;
 
-        public LlmWrapper(IAliasService aliasService, ILogger<LlmWrapper> logger)
+        public LlmWrapper(
+            IAliasService aliasService,
+            ILogger<LlmWrapper> logger,
+            AccessControlService accessControl)
         {
             _aliasService = aliasService;
             _logger = logger;
+            _accessControl = accessControl;
         }
 
         public string BuildSystemPromptAsync(UserContext context)
@@ -57,6 +63,22 @@ namespace AgentBot.Services
             sb.AppendLine($"- Chat ID: {context.ChatId}");
             sb.AppendLine($"- Username: {context.Username ?? "не указан"}");
             sb.AppendLine($"- Роль: {context.Role}");
+            
+            // Проверка прав администратора
+            bool isAdmin = _accessControl.IsAdmin(context.ChatId);
+            sb.AppendLine($"- Администратор: {(isAdmin ? "✅ Да" : "❌ Нет")}");
+            if (isAdmin)
+            {
+                sb.AppendLine("  У вас есть расширенные права:");
+                sb.AppendLine("  - Используйте use_sudo=true для выполнения команд с повышенными привилегиями");
+                sb.AppendLine("  - Используйте allow_any_path=true для доступа к любым путям (/etc, /var/log, /)");
+            }
+            else
+            {
+                sb.AppendLine("  У вас обычные права:");
+                sb.AppendLine("  - Используйте только относительные пути в разрешённых директориях");
+                sb.AppendLine("  - sudo и allow_any_path недоступны");
+            }
             sb.AppendLine();
 
             // Алиасы команд

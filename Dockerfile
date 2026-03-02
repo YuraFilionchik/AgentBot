@@ -37,4 +37,7 @@ COPY --from=publish /app/publish .
 RUN chown -R appuser:appgroup /app
 # switch to non-root user for running the app
 USER appuser
+
+# Load environment variables from .env file (if exists)
+# Variables can also be passed at runtime via docker run -e or docker-compose
 ENTRYPOINT ["dotnet", "AgentBot.dll"]

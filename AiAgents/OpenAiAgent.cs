@@ -124,7 +124,7 @@ namespace AgentBot.AiAgents
                         if (tool != null)
                         {
                             var args = JsonSerializer.Deserialize<Dictionary<string, object>>(argumentsJson) ?? new Dictionary<string, object>();
-                            resultJson = await tool.ExecuteAsync(args);
+                            resultJson = await tool.ExecuteAsync(args, chatId);
                         }
 
                         history.Add(new

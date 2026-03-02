@@ -14,6 +14,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using AgentBot.Security;
 
 namespace AgentBot.Tools
 {
@@ -42,18 +43,21 @@ namespace AgentBot.Tools
             "run_script, run_python, tar_create, tar_extract, zip_create, zip_extract, " +
             "journalctl, dmesg, date, uptime, whoami, pwd, file_info, " +
             "ping, curl, wget, dns_lookup, env_list, env_get. " +
-            "Supports sudo for privileged operations (see LinuxCmdAllowedActions.SudoAllowedActions). " +
-            "Path restrictions apply by default, but can be extended for admin users (allow_any_path=true).";
+            "IMPORTANT: For absolute paths (e.g., /etc, /var/log) or system-wide operations, set allow_any_path=true. " +
+            "For sudo operations (service management, system logs), set use_sudo=true. " +
+            "Admin users have extended privileges - check user role with /whoami command before using allow_any_path or use_sudo. " +
+            "For relative paths, use JUST the filename or relative path from current directory (e.g., 'appsettings.json', 'logs/app.log'). " +
+            "DO NOT prepend 'app/' or other base directory - the tool handles path resolution automatically.";
 
         public Dictionary<string, string> Parameters => new()
         {
             { "action", "string" },      // Действие из списка разрешённых
-            { "path", "string" },        // Путь к файлу/директории
+            { "path", "string" },        // Путь к файлу/директории: для относительных путей используй только имя файла или путь относительно текущей директории (например, 'appsettings.json', 'logs/app.log'). НЕ добавляй 'app/' или другие префиксы.
             { "pattern", "string" },     // Шаблон для grep/find
             { "content", "string" },     // Содержимое для записи
             { "options", "string" },     // Дополнительные опции
-            { "use_sudo", "boolean" },   // Выполнять через sudo
-            { "allow_any_path", "boolean" } // Разрешить работу вне базовой директории
+            { "use_sudo", "boolean" },   // Выполнять через sudo (только для администраторов, проверьте через /whoami)
+            { "allow_any_path", "boolean" } // Разрешить работу вне базовой директории (только для администраторов)
         };
 
         private readonly ILogger<LinuxCMDTool> _logger;
@@ -63,11 +67,21 @@ namespace AgentBot.Tools
         private readonly HashSet<string> _bannedCommands;
         private readonly HashSet<string> _sudoAllowedActions;
         private readonly bool _allowSudo;
+        private readonly AccessControlService _accessControl;
 
-        public LinuxCMDTool(ILogger<LinuxCMDTool> logger, IConfiguration config)
+        public LinuxCMDTool(
+            ILogger<LinuxCMDTool> logger,
+            IConfiguration config,
+            AccessControlService accessControl)
         {
             _logger = logger;
-            _baseDir = config["AppBaseDir"] ?? AppDomain.CurrentDomain.BaseDirectory;
+            
+            // _baseDir используется только для проверки разрешённых директорий
+            // Для относительных путей используется текущая рабочая директория (где запущен процесс)
+            _baseDir = AppContext.BaseDirectory;
+            
+            _logger.LogInformation("LinuxCMDTool: _baseDir={BaseDir}, CurrentDirectory={CurrentDir}",
+                _baseDir, Environment.CurrentDirectory);
 
             // Читаем разрешённые директории из конфига или используем значения по умолчанию
             var allowedDirsConfig = config["LinuxCMD:AllowedDirs"] ?? string.Join(",", LinuxCmdAllowedActions.DefaultDirectories);
@@ -87,6 +101,8 @@ namespace AgentBot.Tools
             // Запрещённые команды (берём из конфигурации или значения по умолчанию)
             _bannedCommands = LinuxCmdAllowedActions.BannedCommands;
 
+            _accessControl = accessControl ?? throw new ArgumentNullException(nameof(accessControl));
+
             EnsureDirectories();
         }
 
@@ -100,10 +116,10 @@ namespace AgentBot.Tools
             }
         }
 
-        public async Task<string> ExecuteAsync(Dictionary<string, object> args)
+        public async Task<string> ExecuteAsync(Dictionary<string, object> args, long chatId = default)
         {
             // Логирование входных параметров
-            _logger.LogInformation("LinuxCMD: Получены аргументы (count={Count}): {Args}", args.Count, JsonSerializer.Serialize(args));
+            _logger.LogInformation("LinuxCMD: Получены аргументы (count={Count}) от chatId={ChatId}: {Args}", args.Count, chatId, JsonSerializer.Serialize(args));
             _logger.LogDebug("LinuxCMD: Разрешённые действия: {AllowedActions}", string.Join(", ", _allowedActions));
 
             // Отладка: логируем типы всех аргументов
@@ -163,31 +179,60 @@ namespace AgentBot.Tools
 
             _logger.LogDebug("LinuxCMD: После санитизации: path={Path}, pattern={Pattern}", path, pattern);
 
-            // Проверка sudo
+            // Проверка sudo - ТОЛЬКО для администраторов
             if (useSudo)
             {
-                _logger.LogInformation("LinuxCMD: Проверка sudo для действия {Action}", action);
+                _logger.LogInformation("LinuxCMD: Проверка sudo для действия {Action} от chatId={ChatId}", action, chatId);
+                
                 if (!_allowSudo)
                 {
                     _logger.LogWarning("LinuxCMD: Sudo запрещён в конфигурации");
                     return JsonSerializer.Serialize(new { error = "Sudo is disabled in configuration." });
                 }
+
+                // Проверка прав администратора
+                if (!_accessControl.IsAdmin(chatId))
+                {
+                    _logger.LogWarning("LinuxCMD: Пользователь chatId={ChatId} не является администратором, sudo запрещён", chatId);
+                    return JsonSerializer.Serialize(new { error = "Sudo access denied: admin privileges required. Use /register to become an admin." });
+                }
+
                 if (!_sudoAllowedActions.Contains(action))
                 {
                     _logger.LogWarning("LinuxCMD: Действие {Action} не разрешено для sudo", action);
                     return JsonSerializer.Serialize(new { error = $"Action '{action}' is not allowed with sudo." });
                 }
+                
+                _logger.LogInformation("LinuxCMD: Пользователь chatId={ChatId} подтверждён как администратор, sudo разрешён", chatId);
             }
 
-            // Проверка пути
+            // Проверка пути - для не-администраторов только разрешённые директории
             string fullPath;
             if (allowAnyPath)
             {
-                _logger.LogInformation("LinuxCMD: Разрешён произвольный путь (allow_any_path=true)");
+                _logger.LogInformation("LinuxCMD: Запрошен произвольный путь (allow_any_path=true) от chatId={ChatId}", chatId);
+
+                // Проверка прав администратора для доступа к произвольным путям
+                if (!_accessControl.IsAdmin(chatId))
+                {
+                    _logger.LogWarning("LinuxCMD: Пользователь chatId={ChatId} не является администратором, доступ к произвольным путям запрещён", chatId);
+                    return JsonSerializer.Serialize(new { error = "Arbitrary path access denied: admin privileges required. Use /register to become an admin." });
+                }
+
+                _logger.LogInformation("LinuxCMD: Администратор chatId={ChatId} получает доступ к произвольному пути", chatId);
+                // Для абсолютных путей используем как есть, для относительных - используем текущую рабочую директорию
                 if (path.StartsWith("/"))
+                {
                     fullPath = path;
+                    _logger.LogDebug("LinuxCMD: allow_any_path: абсолютный путь path={Path}", fullPath);
+                }
                 else
-                    fullPath = Path.Combine(_baseDir, path);
+                {
+                    // Для относительных путей используем как есть (рабочая директория = /app)
+                    fullPath = path;
+                    _logger.LogDebug("LinuxCMD: allow_any_path: относительный путь path={Path}, будет использован относительно CurrentDirectory={CurrentDir}",
+                        path, Environment.CurrentDirectory);
+                }
             }
             else
             {
@@ -198,18 +243,44 @@ namespace AgentBot.Tools
                     return JsonSerializer.Serialize(new { error = "Invalid path." });
                 }
 
-                fullPath = Path.Combine(_baseDir, path);
-                _logger.LogDebug("LinuxCMD: Полный путь: {FullPath}", fullPath);
-                
-                if (!IsPathAllowed(fullPath))
+                // Для обычных пользователей абсолютные пути запрещены
+                if (path.StartsWith("/"))
                 {
-                    _logger.LogWarning("LinuxCMD: Доступ к пути запрещён: {Path}", fullPath);
-                    return JsonSerializer.Serialize(new { error = "Access denied: Path outside allowed directories. Use allow_any_path=true for admin access." });
+                    _logger.LogWarning("LinuxCMD: Абсолютный путь запрещён для не-администраторов: {Path}", path);
+                    return JsonSerializer.Serialize(new { error = "Absolute paths are not allowed. Use relative paths in allowed directories." });
+                }
+
+                // Для относительных путей используем как есть (рабочая директория = /app)
+                fullPath = path;
+                _logger.LogDebug("LinuxCMD: Полный путь: {FullPath} (будет использован относительно CurrentDirectory={CurrentDir})", fullPath, Environment.CurrentDirectory);
+
+                // Проверка по поддиректории (для относительных путей)
+                var subDir = path.Split('/', '\\').FirstOrDefault();
+                if (!_allowedDirs.Contains(subDir ?? string.Empty))
+                {
+                    _logger.LogWarning("LinuxCMD: Доступ к директории запрещён: {SubDir}", subDir);
+                    return JsonSerializer.Serialize(new { error = $"Access denied: directory '{subDir}' is not in allowed directories ({string.Join(", ", _allowedDirs)})." });
                 }
             }
 
             try
             {
+                // Для действий с файлами проверим существование файла
+                if (action is "read_file" or "view_log" or "head_file" or "tail_file" or "cat_file")
+                {
+                    // Проверяем существование файла
+                    string fileToCheck = fullPath.StartsWith("/") ? fullPath : Path.Combine(Environment.CurrentDirectory, fullPath);
+                    
+                    if (!File.Exists(fileToCheck))
+                    {
+                        _logger.LogError("LinuxCMD: Файл не найден: {Path} (полный путь={FullPath}, CurrentDir={CurrentDir})",
+                            path, fileToCheck, Environment.CurrentDirectory);
+                        return JsonSerializer.Serialize(new { error = $"File not found: {path}" });
+                    }
+                    
+                    _logger.LogDebug("LinuxCMD: Файл найден: {FullPath}", fileToCheck);
+                }
+
                 string command = BuildCommand(action, fullPath, pattern, content, options, useSudo);
                 if (string.IsNullOrEmpty(command))
                 {
@@ -284,6 +355,10 @@ namespace AgentBot.Tools
             // Remove dangerous chars/sequences
             input = Regex.Replace(input, @"[;&|><$()`\n\r]", string.Empty);
 
+            // Удаляем распространённые ошибочные префиксы, которые может добавлять ИИ
+            // Например, 'app/', './app/', '../app/' и т.д.
+            input = Regex.Replace(input, @"^(\./|\.\./|app/)+", string.Empty, RegexOptions.IgnoreCase);
+            
             // Нормализуем путь
             try
             {
@@ -417,7 +492,8 @@ namespace AgentBot.Tools
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
-                CreateNoWindow = true
+                CreateNoWindow = true,
+                WorkingDirectory = Environment.CurrentDirectory // Явно указываем рабочую директорию
             };
 
             using var process = new Process { StartInfo = processInfo };

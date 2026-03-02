@@ -48,7 +48,7 @@ namespace AgentBot.Tools
             _logger = logger;
         }
 
-        public async Task<string> ExecuteAsync(Dictionary<string, object> args)
+        public async Task<string> ExecuteAsync(Dictionary<string, object> args, long toolChatId = default)
         {
             try
             {

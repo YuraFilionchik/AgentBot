@@ -42,57 +42,102 @@ namespace AgentBot.Tools
 
         private IBotProvider BotProvider => _serviceProvider.GetRequiredService<IBotProvider>();
 
+        private static bool TryGetLong(object? obj, out long value)
+        {
+            value = 0;
+            if (obj == null) return false;
+            
+            if (obj is long l) { value = l; return true; }
+            if (obj is int i) { value = i; return true; }
+            if (obj is double d) { value = (long)d; return true; }
+            
+            if (obj is JsonElement je)
+            {
+                if (je.ValueKind == JsonValueKind.Number && je.TryGetInt64(out value))
+                    return true;
+                if (je.ValueKind == JsonValueKind.String && long.TryParse(je.GetString(), out value))
+                    return true;
+            }
+            
+            if (long.TryParse(obj.ToString(), out value))
+                return true;
+                
+            return false;
+        }
+
+        private static string GetStringArg(object? obj)
+        {
+            if (obj == null) return string.Empty;
+            if (obj is string s) return s;
+            if (obj is JsonElement je) return je.ValueKind == JsonValueKind.Null ? string.Empty : (je.GetString() ?? string.Empty);
+            return obj.ToString() ?? string.Empty;
+        }
+
 
         public async Task<string> ExecuteAsync(Dictionary<string, object> args, long toolChatId = default)
         {
             try
             {
-                if (!args.TryGetValue("chat_id", out var chatIdObj) || chatIdObj is not long chatId)
+                if (!args.TryGetValue("chat_id", out var chatIdObj) || !TryGetLong(chatIdObj, out long chatId))
                 {
                     return JsonSerializer.Serialize(new { error = "chat_id обязателен и должен быть числом" });
                 }
 
-                if (!args.TryGetValue("file_name", out var fileNameObj) || fileNameObj is not string fileName)
+                if (!args.TryGetValue("file_name", out var fileNameObj))
                 {
-                    return JsonSerializer.Serialize(new { error = "file_name обязателен и должен быть строкой" });
+                    return JsonSerializer.Serialize(new { error = "file_name обязателен" });
+                }
+                string fileName = GetStringArg(fileNameObj);
+                if (string.IsNullOrEmpty(fileName))
+                {
+                    return JsonSerializer.Serialize(new { error = "file_name обязателен и не может быть пустым" });
                 }
 
-                string? caption = args.TryGetValue("caption", out var capObj) && capObj is string c ? c : null;
+                string? caption = args.TryGetValue("caption", out var capObj) ? GetStringArg(capObj) : null;
+                if (string.IsNullOrEmpty(caption)) caption = null;
 
                 // Вариант 1: Отправка файла из содержимого
-                if (args.TryGetValue("content", out var contentObj) && contentObj is string content)
+                if (args.TryGetValue("content", out var contentObj))
                 {
-                    byte[] fileBytes = Encoding.UTF8.GetBytes(content);
-                    _logger.LogInformation("Отправка файла {FileName} в чат {ChatId} (из содержимого)", fileName, chatId);
-                    await BotProvider.SendFileAsync(chatId, fileBytes, fileName, caption);
-
-                    return JsonSerializer.Serialize(new
+                    string content = GetStringArg(contentObj);
+                    if (!string.IsNullOrEmpty(content))
                     {
-                        success = true,
-                        message = "Файл отправлен",
-                        chat_id = chatId,
-                        file_name = fileName,
-                        size = fileBytes.Length
-                    });
+                        byte[] fileBytes = Encoding.UTF8.GetBytes(content);
+                        _logger.LogInformation("Отправка файла {FileName} в чат {ChatId} (из содержимого)", fileName, chatId);
+                        await BotProvider.SendFileAsync(chatId, fileBytes, fileName, caption);
+
+                        return JsonSerializer.Serialize(new
+                        {
+                            success = true,
+                            message = "Файл отправлен",
+                            chat_id = chatId,
+                            file_name = fileName,
+                            size = fileBytes.Length
+                        });
+                    }
                 }
 
                 // Вариант 2: Отправка файла из пути
-                if (args.TryGetValue("file_path", out var pathObj) && pathObj is string filePath)
+                if (args.TryGetValue("file_path", out var pathObj))
                 {
-                    _logger.LogInformation("Отправка файла {FilePath} в чат {ChatId}", filePath, chatId);
-                    await BotProvider.SendFileFromPathAsync(chatId, filePath, caption);
-
-                    return JsonSerializer.Serialize(new
+                    string filePath = GetStringArg(pathObj);
+                    if (!string.IsNullOrEmpty(filePath))
                     {
-                        success = true,
-                        message = "Файл отправлен",
-                        chat_id = chatId,
-                        file_name = fileName,
-                        file_path = filePath
-                    });
+                        _logger.LogInformation("Отправка файла {FilePath} в чат {ChatId}", filePath, chatId);
+                        await BotProvider.SendFileFromPathAsync(chatId, filePath, caption);
+
+                        return JsonSerializer.Serialize(new
+                        {
+                            success = true,
+                            message = "Файл отправлен",
+                            chat_id = chatId,
+                            file_name = fileName,
+                            file_path = filePath
+                        });
+                    }
                 }
 
-                return JsonSerializer.Serialize(new { error = "Требуется либо content, либо file_path" });
+                return JsonSerializer.Serialize(new { error = "Требуется либо непустой content, либо непустой file_path" });
             }
             catch (Exception ex)
             {

@@ -46,7 +46,8 @@ namespace AgentBot.Tools
             "IMPORTANT: For absolute paths (e.g., /etc, /var/log) or system-wide operations, set allow_any_path=true. " +
             "For sudo operations (service management, system logs), set use_sudo=true. " +
             "Admin users have extended privileges - check user role with /whoami command before using allow_any_path or use_sudo. " +
-            "For relative paths, use JUST the filename or relative path from current directory (e.g., 'appsettings.json', 'logs/app.log'). " +
+            "By default (allow_any_path=false), you can ONLY access files in allowed subdirectories (like logs/, data/, config/). " +
+            "To access files in the root directory (like appsettings.json), you MUST set allow_any_path=true. " +
             "DO NOT prepend 'app/' or other base directory - the tool handles path resolution automatically.";
 
         public Dictionary<string, string> Parameters => new()
@@ -255,8 +256,16 @@ namespace AgentBot.Tools
                 _logger.LogDebug("LinuxCMD: Полный путь: {FullPath} (будет использован относительно CurrentDirectory={CurrentDir})", fullPath, Environment.CurrentDirectory);
 
                 // Проверка по поддиректории (для относительных путей)
-                var subDir = path.Split('/', '\\').FirstOrDefault();
-                if (!_allowedDirs.Contains(subDir ?? string.Empty))
+                var parts = path.Split('/', '\\');
+                var subDir = parts.Length > 1 ? parts[0] : string.Empty;
+                
+                if (string.IsNullOrEmpty(subDir))
+                {
+                    _logger.LogWarning("LinuxCMD: Доступ к корневой директории запрещен (требуется allow_any_path=true): {Path}", path);
+                    return JsonSerializer.Serialize(new { error = $"Access to files in the root directory (like '{path}') requires 'allow_any_path': true." });
+                }
+
+                if (!_allowedDirs.Contains(subDir))
                 {
                     _logger.LogWarning("LinuxCMD: Доступ к директории запрещён: {SubDir}", subDir);
                     return JsonSerializer.Serialize(new { error = $"Access denied: directory '{subDir}' is not in allowed directories ({string.Join(", ", _allowedDirs)})." });
@@ -362,7 +371,18 @@ namespace AgentBot.Tools
             // Нормализуем путь
             try
             {
-                input = Path.GetFullPath(input).TrimStart(Path.DirectorySeparatorChar);
+                bool isAbsolute = Path.IsPathRooted(input);
+                string normalizedFullPath = Path.GetFullPath(input);
+                if (!isAbsolute)
+                {
+                    // Если путь был относительным, нужно вернуть его относительным текущей директории
+                    input = Path.GetRelativePath(Environment.CurrentDirectory, normalizedFullPath);
+                    input = input.Replace('\\', '/'); // Унифицируем слеши
+                }
+                else
+                {
+                    input = normalizedFullPath.Replace('\\', '/');
+                }
             }
             catch
             {
@@ -407,7 +427,7 @@ namespace AgentBot.Tools
                 
                 // Поиск и анализ
                 "grep" => $"{sudo}grep {options} \"{EscapeContent(pattern)}\" \"{fullPath}\"",
-                "find" => $"{sudo}find \"{Path.GetDirectoryName(fullPath) ?? _baseDir}\" {options} -name \"{EscapeContent(pattern)}\"",
+                "find" => $"{sudo}find \"{(string.IsNullOrEmpty(fullPath) ? _baseDir : fullPath)}\" {options} -name \"{EscapeContent(pattern)}\"",
                 "wc" => $"{sudo}wc {options} \"{fullPath}\"",
                 "sort" => $"{sudo}sort {options} \"{fullPath}\"",
                 "uniq" => $"{sudo}uniq {options} \"{fullPath}\"",

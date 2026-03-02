@@ -1,28 +1,50 @@
-# This workflow will build a .NET project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net
-
-name: .NET
+name: Build & Publish .NET Worker (Linux self-contained)
 
 on:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  release:
+    types: [published]
 
 jobs:
-  build:
-
+  build-and-publish:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Setup .NET
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET 9
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: 9.0.x
+        dotnet-version: '9.0.x'
+
     - name: Restore dependencies
       run: dotnet restore
-    - name: Build
-      run: dotnet build --no-restore
-    - name: Test
-      run: dotnet test --no-build --verbosity normal
+
+    - name: Publish self-contained single-file for Linux x64
+      run: |
+        dotnet publish AgentBot.csproj \
+          -c Release \
+          -r linux-x64 \
+          --self-contained true \
+          -p:PublishSingleFile=true \
+          -p:DebugType=embedded \
+          -p:IncludeNativeLibrariesForSelfExtract=true \
+          -o ./publish/linux-x64
+
+    - name: Zip the published output
+      run: |
+        cd publish/linux-x64
+        zip -r ../../AgentBot-linux-x64.zip .
+        cd ../..
+
+    - name: Upload artifact (zip)
+      uses: actions/upload-artifact@v4
+      with:
+        name: AgentBot-linux-x64
+        path: AgentBot-linux-x64.zip
+        retention-days: 14
+        compression-level: 6

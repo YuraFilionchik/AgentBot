@@ -14,10 +14,14 @@ using Serilog;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-// Конфигурация (appsettings.json + env vars)
-builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
+// Конфигурация: корневой appsettings.json загружается автоматически через CreateApplicationBuilder.
+// Config/appsettings.json — секреты (токены, ключи). Путь от директории приложения, не от WorkingDirectory.
+var configPath = Path.Combine(AppContext.BaseDirectory, "Config", "appsettings.json");
+builder.Configuration.AddJsonFile(configPath, optional: false, reloadOnChange: true);
 
-// Логи (Serilog в файл и консоль)
+
+// Логи (Serilog только в файл)
+builder.Logging.ClearProviders();
 builder.Logging.AddSerilog(new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
     .CreateLogger());

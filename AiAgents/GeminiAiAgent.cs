@@ -119,6 +119,83 @@ namespace AgentBot.AiAgents
                     // Логируем роль для отладки
                     _logger.LogDebug("Chat {ChatId}: получена роль от Gemini: {Role}", chatId, content.Role);
 
+                    // Обработка function call
+                    var functionCallParts = content.Parts?
+                        .Where(p => p.FunctionCall != null)
+                        .ToList() ?? new List<Part>();
+
+                    if (functionCallParts.Any())
+                    {
+                        // НЕ сохраняем function call в персистентную историю,
+                        // а добавляем только в текущий список history для следующего запроса
+                        var functionCallContent = new Content
+                        {
+                            Role = "model",
+                            Parts = functionCallParts.Select(p => new Part { FunctionCall = p.FunctionCall }).ToList()
+                        };
+                        history.Add(functionCallContent);
+
+                        var toolResponseParts = new List<Part>();
+
+                        foreach (var part in functionCallParts)
+                        {
+                            var fc = part.FunctionCall!;
+                            _logger.LogInformation("Chat {ChatId}: Gemini вызвал функцию: {Name}", chatId, fc.Name);
+
+                            var toolFunc = tools.FirstOrDefault(t => t.Name.Equals(fc.Name, StringComparison.OrdinalIgnoreCase));
+                            if (toolFunc == null)
+                            {
+                                _logger.LogWarning("Chat {ChatId}: Tool not found: {Name}", chatId, fc.Name);
+                                continue;
+                            }
+
+                            var args = fc.Args ?? new Dictionary<string, object>();
+                            _logger.LogDebug("Chat {ChatId}: Аргументы функции {Name}: {Args}", chatId, fc.Name, JsonSerializer.Serialize(args));
+
+                            string resultJson = await toolFunc.ExecuteAsync(args, chatId);
+
+                            var responsePart = new Part
+                            {
+                                FunctionResponse = new FunctionResponse
+                                {
+                                    Name = fc.Name,
+                                    Response = JsonToDict(resultJson)
+                                }
+                            };
+
+                            toolResponseParts.Add(responsePart);
+                        }
+
+                        if (toolResponseParts.Count == 0)
+                        {
+                            _logger.LogWarning("Chat {ChatId}: Не удалось сформировать ответы инструментов для {Count} вызовов", chatId, functionCallParts.Count);
+                            return "Не удалось выполнить запрошенные инструменты.";
+                        }
+
+                        // Добавляем function response в историю (только в текущий список, не в персистентное хранилище)
+                        var toolResponseContent = new Content
+                        {
+                            Role = "tool",
+                            Parts = toolResponseParts
+                        };
+                        history.Add(toolResponseContent);
+
+                        // Логируем историю для отладки
+                        _logger.LogDebug("Chat {ChatId}: история для следующего запроса ({Count} сообщений):", chatId, history.Count);
+                        foreach (var h in history)
+                        {
+                            var partTypes = string.Join(", ", h.Parts?.Select(p =>
+                                p.Text != null ? "text" :
+                                p.FunctionCall != null ? $"functionCall({p.FunctionCall.Name})" :
+                                p.FunctionResponse != null ? $"functionResponse({p.FunctionResponse.Name})" :
+                                "unknown") ?? Enumerable.Empty<string>());
+                            _logger.LogDebug("  Role={Role}, Parts=[{PartTypes}]", h.Role, partTypes);
+                        }
+
+                        iteration++;
+                        continue;
+                    }
+
                     // Финальный текстовый ответ
                     var textPart = content.Parts?.FirstOrDefault(p => !string.IsNullOrEmpty(p.Text));
                     if (textPart != null)
@@ -131,75 +208,7 @@ namespace AgentBot.AiAgents
                         return finalAnswer;
                     }
 
-                    // Обработка function call
-                    var functionCallParts = content.Parts?
-                        .Where(p => p.FunctionCall != null)
-                        .ToList() ?? new List<Part>();
-
-                    if (!functionCallParts.Any())
-                        return "Gemini не смог сгенерировать ответ.";
-
-                    // НЕ сохраняем function call в персистентную историю,
-                    // а добавляем только в текущий список history для следующего запроса
-                    var functionCallContent = new Content
-                    {
-                        Role = "model",
-                        Parts = functionCallParts.Select(p => new Part { FunctionCall = p.FunctionCall }).ToList()
-                    };
-                    history.Add(functionCallContent);
-
-                    var toolResponseParts = new List<Part>();
-
-                    foreach (var part in functionCallParts)
-                    {
-                        var fc = part.FunctionCall!;
-                        _logger.LogInformation("Chat {ChatId}: Gemini вызвал функцию: {Name}", chatId, fc.Name);
-
-                        var toolFunc = tools.FirstOrDefault(t => t.Name.Equals(fc.Name, StringComparison.OrdinalIgnoreCase));
-                        if (toolFunc == null)
-                        {
-                            _logger.LogWarning("Chat {ChatId}: Tool not found: {Name}", chatId, fc.Name);
-                            continue;
-                        }
-
-                        var args = fc.Args ?? new Dictionary<string, object>();
-                        _logger.LogDebug("Chat {ChatId}: Аргументы функции {Name}: {Args}", chatId, fc.Name, JsonSerializer.Serialize(args));
-
-                        string resultJson = await toolFunc.ExecuteAsync(args, chatId);
-
-                        var responsePart = new Part
-                        {
-                            FunctionResponse = new FunctionResponse
-                            {
-                                Name = fc.Name,
-                                Response = JsonToDict(resultJson)
-                            }
-                        };
-
-                        toolResponseParts.Add(responsePart);
-                    }
-
-                    // Добавляем function response в историю (только в текущий список, не в персистентное хранилище)
-                    var toolResponseContent = new Content
-                    {
-                        Role = "tool",
-                        Parts = toolResponseParts
-                    };
-                    history.Add(toolResponseContent);
-
-                    // Логируем историю для отладки
-                    _logger.LogDebug("Chat {ChatId}: история для следующего запроса ({Count} сообщений):", chatId, history.Count);
-                    foreach (var h in history)
-                    {
-                        var partTypes = string.Join(", ", h.Parts?.Select(p =>
-                            p.Text != null ? "text" :
-                            p.FunctionCall != null ? $"functionCall({p.FunctionCall.Name})" :
-                            p.FunctionResponse != null ? $"functionResponse({p.FunctionResponse.Name})" :
-                            "unknown") ?? Enumerable.Empty<string>());
-                        _logger.LogDebug("  Role={Role}, Parts=[{PartTypes}]", h.Role, partTypes);
-                    }
-
-                    iteration++;
+                    return "Gemini не смог сгенерировать ответ.";
                 }
                 catch (Exception ex)
                 {

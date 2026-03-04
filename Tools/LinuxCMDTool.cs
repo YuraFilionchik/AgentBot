@@ -458,7 +458,7 @@ namespace AgentBot.Tools
                 "port_check" => $"{sudo}ss -tlnp {options} || {sudo}netstat -tlnp {options}",
                 
                 // Скрипты
-                "run_script" => $"{sudo}bash \"{fullPath}\" {options}",
+                "run_script" => BuildRunScriptCommand(sudo, fullPath, content, options),
                 "run_python" => $"{sudo}python3 \"{fullPath}\" {options}",
                 
                 // Архивы
@@ -499,6 +499,26 @@ namespace AgentBot.Tools
             return content.Replace("\"", "\\\"").Replace("$", "\\$").Replace("`", "\\`");
         }
 
+        private static string BuildRunScriptCommand(string sudo, string fullPath, string content, string options)
+        {
+            if (!string.IsNullOrWhiteSpace(content))
+            {
+                return $"{sudo}bash -lc '{EscapeSingleQuoted(content)}'";
+            }
+
+            if (!string.IsNullOrWhiteSpace(fullPath))
+            {
+                return $"{sudo}bash \"{fullPath}\" {options}";
+            }
+
+            return string.Empty;
+        }
+
+        private static string EscapeSingleQuoted(string value)
+        {
+            return value.Replace("'", "'\\''");
+        }
+
         // ────────────────────────────────────────────────
         //                  Execution
         // ────────────────────────────────────────────────
@@ -508,13 +528,15 @@ namespace AgentBot.Tools
             var processInfo = new ProcessStartInfo
             {
                 FileName = "/bin/bash",
-                Arguments = $"-c \"{command}\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WorkingDirectory = Environment.CurrentDirectory // Явно указываем рабочую директорию
             };
+
+            processInfo.ArgumentList.Add("-c");
+            processInfo.ArgumentList.Add(command);
 
             using var process = new Process { StartInfo = processInfo };
             process.Start();

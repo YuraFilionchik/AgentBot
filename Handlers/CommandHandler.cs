@@ -121,6 +121,56 @@ namespace AgentBot.Handlers
             return spaceIndex > 0 ? messageText[(spaceIndex + 1)..].Trim() : string.Empty;
         }
 
+        /// <summary>
+        /// Parses a string into tokens, treating text in double quotes as a single token.
+        /// Quotes are stripped from the resulting tokens.
+        /// Example: morning "0 8 * * 3" Проверь статус → ["morning", "0 8 * * 3", "Проверь", "статус"]
+        /// </summary>
+        private static List<string> ParseQuotedArgs(string input)
+        {
+            var result = new List<string>();
+            if (string.IsNullOrWhiteSpace(input))
+                return result;
+
+            var span = input.AsSpan().Trim();
+            int i = 0;
+
+            while (i < span.Length)
+            {
+                // Skip whitespace
+                while (i < span.Length && char.IsWhiteSpace(span[i]))
+                    i++;
+
+                if (i >= span.Length)
+                    break;
+
+                if (span[i] == '"')
+                {
+                    // Quoted token — find closing quote
+                    i++; // skip opening quote
+                    int start = i;
+                    while (i < span.Length && span[i] != '"')
+                        i++;
+
+                    result.Add(span[start..i].ToString());
+
+                    if (i < span.Length)
+                        i++; // skip closing quote
+                }
+                else
+                {
+                    // Unquoted token — read until whitespace
+                    int start = i;
+                    while (i < span.Length && !char.IsWhiteSpace(span[i]))
+                        i++;
+
+                    result.Add(span[start..i].ToString());
+                }
+            }
+
+            return result;
+        }
+
         // ────────────────────────────────────────────────
         //  Базовые команды
         // ────────────────────────────────────────────────
@@ -404,24 +454,25 @@ namespace AgentBot.Handlers
             {
                 return "⏰ Управление Cron-задачами:\n\n" +
                        "Создать задачу:\n" +
-                       "  /cron <название> <cron> <описание>\n\n" +
+                       "  /cron <название> \"<cron>\" <описание>\n\n" +
                        "Примеры cron:\n" +
-                       "  0 10 * * * — каждый день в 10:00\n" +
-                       "  */5 * * * * — каждые 5 минут\n" +
-                       "  0 9 * * 1 — каждый понедельник в 9:00\n\n" +
+                       "  \"0 10 * * *\" — каждый день в 10:00\n" +
+                       "  \"*/5 * * * *\" — каждые 5 минут\n" +
+                       "  \"0 9 * * 1\" — каждый понедельник в 9:00\n\n" +
                        "Пример: /cron morning \"0 8 * * *\" Отправить доброе утро";
             }
 
-            var parts = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length < 3)
+            // Парсим аргументы с учётом кавычек: /cron <name> "<cron>" <description>
+            var parsedParts = ParseQuotedArgs(args);
+            if (parsedParts.Count < 3)
             {
-                return "⚠️ Формат: /cron <название> <cron-expression> <описание>\n" +
+                return "⚠️ Формат: /cron <название> \"<cron-expression>\" <описание>\n" +
                        "Пример: /cron morning \"0 8 * * *\" Отправить доброе утро";
             }
 
-            string name = parts[0];
-            string cronExpr = parts[1];
-            string description = string.Join(' ', parts[2..]);
+            string name = parsedParts[0];
+            string cronExpr = parsedParts[1];
+            string description = string.Join(' ', parsedParts.Skip(2));
 
             // Проверяем валидность cron-выражения
             var nextRun = _cronTaskService.GetNextOccurrence(cronExpr);

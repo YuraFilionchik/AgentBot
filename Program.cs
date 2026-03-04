@@ -62,6 +62,7 @@ builder.Services.AddTransient<IToolFunction, LinuxCMDTool>();
 builder.Services.AddTransient<IToolFunction, WeatherTool>();
 builder.Services.AddTransient<IToolFunction, SendMessageTool>();
 builder.Services.AddTransient<IToolFunction, SendFileTool>();
+builder.Services.AddTransient<IToolFunction, CronTool>();
 // builder.Services.AddTransient<IToolFunction, DatabaseTool>(); // Когда будет реализован
 
 // Фоновые сервисы

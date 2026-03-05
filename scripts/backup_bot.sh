@@ -14,6 +14,7 @@ EXCLUDES=(
     "*.tmp"
     ".pdb"
     "*.dll"
+    "scripts/"
 )
 
 # --- ПРОВЕРКИ ---

@@ -9,6 +9,8 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using AgentBot.Memory;
+using AgentBot.Services;
 using Polly;
 using Polly.Retry;
 
@@ -20,17 +22,23 @@ namespace AgentBot.AiAgents
         private readonly string _modelName;
         private readonly string _apiKey;
         private readonly ILogger<OpenAiAgent> _logger;
+        private readonly ILlmWrapper _llmWrapper;
+        private readonly IConversationMemory _memory;
         private readonly AsyncRetryPolicy _retryPolicy;
 
-        private readonly ConcurrentDictionary<long, List<object>> _histories = new();
-        private const int MaxHistoryMessages = 20;
-
-        public OpenAiAgent(IConfiguration configuration, HttpClient httpClient, ILogger<OpenAiAgent> logger)
+        public OpenAiAgent(
+            IConfiguration configuration,
+            HttpClient httpClient,
+            ILogger<OpenAiAgent> logger,
+            ILlmWrapper llmWrapper,
+            IConversationMemory memory)
         {
             _apiKey = configuration["AiAgent:ApiKey"] ?? throw new ArgumentException("OpenAI API key is missing");
             _modelName = configuration["AiAgent:Model"] ?? "gpt-4o";
             _httpClient = httpClient;
             _logger = logger;
+            _llmWrapper = llmWrapper;
+            _memory = memory;
             _httpClient.BaseAddress = new Uri(configuration["AiAgent:ApiUrl"] ?? "https://api.openai.com/v1/");
 
             // Инициализация политики ретраев
@@ -41,12 +49,49 @@ namespace AgentBot.AiAgents
         {
             if (string.IsNullOrWhiteSpace(message)) return "Пустое сообщение!";
 
-            var history = _histories.GetOrAdd(chatId, _ => new List<object>());
+            _logger.LogInformation("Chat {ChatId}: OpenAI ← {Message}", chatId, message);
 
-            if (history.Count > MaxHistoryMessages)
-                history.RemoveRange(0, history.Count - MaxHistoryMessages);
+            // Формируем контекст пользователя
+            var userContext = await _llmWrapper.BuildUserContextAsync(chatId, string.Empty, "user");
+            userContext.AvailableTools.AddRange(tools.Select(t => new ToolInfo
+            {
+                Name = t.Name,
+                Description = t.Description,
+                Parameters = t.Parameters
+            }));
 
-            history.Add(new { role = "user", content = message });
+            // Формируем системный промпт
+            string systemPrompt = _llmWrapper.BuildSystemPrompt(userContext);
+
+            // Преобразуем сообщение с учётом алиасов
+            string processedMessage = await _llmWrapper.BuildUserMessageAsync(chatId, message);
+
+            // Получаем историю чата
+            var savedHistory = await _memory.GetHistoryAsync(chatId, 20);
+            var apiMessages = new List<object>();
+
+            // Добавляем системный промпт
+            apiMessages.Add(new { role = "system", content = systemPrompt });
+
+            // Добавляем сохранённую историю
+            foreach (var content in savedHistory)
+            {
+                apiMessages.Add(new
+                {
+                    role = content.Role,
+                    content = string.Join("\n", content.Parts?.Select(p => p.Text) ?? Enumerable.Empty<string>())
+                });
+            }
+
+            // Добавляем текущее сообщение
+            var userMsg = new { role = "user", content = processedMessage };
+            apiMessages.Add(userMsg);
+
+            // Сохраняем в историю
+            var userContent = new Google.GenAI.Types.Content { Role = "user" };
+            userContent.Parts ??= new();
+            userContent.Parts.Add(new Google.GenAI.Types.Part { Text = processedMessage });
+            await _memory.AddMessageAsync(chatId, userContent);
 
             var openAiTools = tools.Select(t => new
             {
@@ -74,7 +119,7 @@ namespace AgentBot.AiAgents
                 var requestBody = new
                 {
                     model = _modelName,
-                    messages = history,
+                    messages = apiMessages,
                     tools = openAiTools.Any() ? openAiTools : null,
                     tool_choice = openAiTools.Any() ? "auto" : null
                 };
@@ -106,7 +151,7 @@ namespace AgentBot.AiAgents
                 string? answerText = messageNode.TryGetProperty("content", out var contentNode) && contentNode.ValueKind == JsonValueKind.String ? contentNode.GetString() : null;
                 var toolCalls = messageNode.TryGetProperty("tool_calls", out var tcNode) && tcNode.ValueKind == JsonValueKind.Array ? tcNode : (JsonElement?)null;
 
-                history.Add(JsonSerializer.Deserialize<object>(messageNode.GetRawText())!);
+                apiMessages.Add(JsonSerializer.Deserialize<object>(messageNode.GetRawText())!);
 
                 if (toolCalls != null)
                 {
@@ -127,7 +172,7 @@ namespace AgentBot.AiAgents
                             resultJson = await tool.ExecuteAsync(args, chatId);
                         }
 
-                        history.Add(new
+                        apiMessages.Add(new
                         {
                             role = "tool",
                             tool_call_id = toolCall.GetProperty("id").GetString(),
@@ -139,6 +184,13 @@ namespace AgentBot.AiAgents
                 }
                 else
                 {
+                    if (answerText != null)
+                    {
+                        var assistantContent = new Google.GenAI.Types.Content { Role = "assistant" };
+                        assistantContent.Parts ??= new();
+                        assistantContent.Parts.Add(new Google.GenAI.Types.Part { Text = answerText });
+                        await _memory.AddMessageAsync(chatId, assistantContent);
+                    }
                     return answerText ?? "No text response.";
                 }
             }

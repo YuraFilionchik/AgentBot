@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using AgentBot.Models;
 using AgentBot.Security;
@@ -20,6 +21,7 @@ namespace AgentBot.Handlers
         private readonly List<IToolFunction> _tools;
         private readonly IAliasService _aliasService;
         private readonly ICronTaskService _cronTaskService;
+        private readonly IKeyboardService _keyboardService;
         private readonly AccessControlService _accessControl;
 
         private readonly Dictionary<string, Func<Message, Task<string>>> _commandHandlers;
@@ -34,6 +36,7 @@ namespace AgentBot.Handlers
             IEnumerable<IToolFunction> tools,
             IAliasService aliasService,
             ICronTaskService cronTaskService,
+            IKeyboardService keyboardService,
             AccessControlService accessControl)
         {
             _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
@@ -41,6 +44,7 @@ namespace AgentBot.Handlers
             _tools = tools?.ToList() ?? new List<IToolFunction>();
             _aliasService = aliasService ?? throw new ArgumentNullException(nameof(aliasService));
             _cronTaskService = cronTaskService ?? throw new ArgumentNullException(nameof(cronTaskService));
+            _keyboardService = keyboardService ?? throw new ArgumentNullException(nameof(keyboardService));
             _accessControl = accessControl ?? throw new ArgumentNullException(nameof(accessControl));
 
 
@@ -57,6 +61,9 @@ namespace AgentBot.Handlers
                 ["/cron"]        = HandleCronAsync,
                 ["/listcrons"]   = HandleListCronsAsync,
                 ["/deletecron"]  = HandleDeleteCronAsync,
+                ["/run"]         = HandleRunAsync,
+                ["/timers"]      = HandleTimersAsync,
+                ["/stoprun"]     = HandleStopRunAsync,
                 ["/register"]    = HandleRegisterAsync,
                 ["/restart"]     = HandleRestartAsync,
                 ["/backup"]      = HandleBackupAsync,
@@ -99,7 +106,10 @@ namespace AgentBot.Handlers
                 {
                     string response = await handler(message);
                     if (!string.IsNullOrWhiteSpace(response))
-                        await BotProvider.SendMessageAsync(chatId, response);
+                    {
+                        var keyboard = await _keyboardService.GetMainKeyboardAsync(chatId);
+                        await BotProvider.SendMessageAsync(chatId, response, replyMarkup: keyboard);
+                    }
                     return true;
                 }
                 catch (Exception ex)
@@ -200,17 +210,26 @@ namespace AgentBot.Handlers
             "🔹 /start — начать общение\n" +
             "🔹 /help — показать справку\n" +
             "🔹 /about — информация о боте\n" +
-            "🔹 /status — проверить состояние\n\n" +
+            "🔹 /status — проверить состояние\n" +
+            "🔹 /whoami — информация о пользователе\n\n" +
             "📚 Алиасы:\n" +
             "  /alias <имя> <значение> [type] — создать алиас\n" +
             "  /deletealias <имя> — удалить алиас\n" +
             "  /listaliases — показать все алиасы\n\n" +
+            "⏰ Cron-задачи:\n" +
+            "  /cron <название> \"<cron>\" <описание> — создать задачу\n" +
+            "  /listcrons — список задач\n" +
+            "  /deletecron <ID> — удалить задачу\n\n" +
+            "⏱ Отложенные задачи (systemd-run):\n" +
+            "  /run <delay> [\"desc\"] <cmd> — запустить задачу через время\n" +
+            "  /timers — список всех таймеров\n" +
+            "  /stoprun <unit> — остановить отложенную задачу\n\n" +
             "🌤 /weather <город> — погода\n" +
             "📝 /note <текст> — сохранить заметку\n\n" +
             "🔧 Администрирование:\n" +
             "  /restart — перезапустить бота\n" +
-            "  /update — обновить бота (git pull + rebuild)\n" +
-            "  /backup — создать резервную копию\n" +
+            "  /update — обновить бота\n" +
+            "  /backup — создать бекап\n" +
             "  /restore [файл] — восстановить из бекапа\n" +
             "  /register <пароль> — получить права админа\n\n" +
             "Просто пиши вопросы — отвечу через ИИ-агент ✨");
@@ -658,6 +677,171 @@ namespace AgentBot.Handlers
             return deleted
                 ? $"🗑 Задача #{taskId} удалена."
                 : $"⚠️ Задача #{taskId} не найдена.";
+        }
+
+        // ────────────────────────────────────────────────
+        //  Отложенные задачи (systemd-run)
+        // ────────────────────────────────────────────────
+
+        private async Task<string> HandleRunAsync(Message message)
+        {
+            long chatId = message.Chat.Id;
+            string args = ExtractArgument(message.Text!);
+
+            if (string.IsNullOrWhiteSpace(args))
+            {
+                return "⏱ Запуск отложенных задач:\n\n" +
+                       "Использование:\n" +
+                       "  /run <задержка> <команда>\n" +
+                       "  /run <задержка> \"<описание>\" <команда>\n\n" +
+                       "Примеры задержки: 15min, 2h, 45s, 30 (сек)\n" +
+                       "Пример: /run 1m \"Тест\" echo 'hello' >> /tmp/test.log";
+            }
+
+            // Пытаемся распарсить аргументы.
+            // Если вторым аргументом идет строка в кавычках - считаем её описанием.
+            var parts = ParseQuotedArgs(args);
+            if (parts.Count < 2) return "⚠️ Недостаточно аргументов. Нужно: <задержка> <команда>";
+
+            string delay = parts[0];
+            string description = "";
+            string command;
+
+            // Проверяем, было ли описание в кавычках (второй элемент parts)
+            // Мы не можем точно знать, было ли оно в кавычках после ParseQuotedArgs,
+            // но мы можем проверить оригинальную строку.
+            int firstSpace = args.IndexOf(' ');
+            if (firstSpace > 0)
+            {
+                string afterDelay = args[(firstSpace + 1)..].TrimStart();
+                if (afterDelay.StartsWith('"'))
+                {
+                    description = parts[1];
+                    command = string.Join(' ', parts.Skip(2));
+                }
+                else
+                {
+                    command = string.Join(' ', parts.Skip(1));
+                }
+            }
+            else
+            {
+                command = string.Join(' ', parts.Skip(1));
+            }
+
+            if (string.IsNullOrWhiteSpace(command))
+                return "⚠️ Не указана команда.";
+
+            var tool = _tools.FirstOrDefault(t => t.Name == "SystemdRun");
+            if (tool == null) return "❌ Инструмент SystemdRun не загружен.";
+
+            var toolArgs = new Dictionary<string, object>
+            {
+                { "action", "create" },
+                { "delay", delay },
+                { "command", command },
+                { "use_sudo", _accessControl.IsAdmin(chatId) }
+            };
+            if (!string.IsNullOrEmpty(description)) toolArgs["description"] = description;
+
+            try
+            {
+                string jsonResult = await tool.ExecuteAsync(toolArgs, chatId);
+                var result = JsonSerializer.Deserialize<JsonElement>(jsonResult);
+
+                if (result.TryGetProperty("success", out var success) && success.GetBoolean())
+                {
+                    string output = result.GetProperty("output").GetString() ?? "";
+                    return $"🚀 Задача запланирована!\n\n" +
+                           $"⏱ Задержка: {delay}\n" +
+                           (string.IsNullOrEmpty(description) ? "" : $"📝 Описание: {description}\n") +
+                           $"💻 Команда: `{command}`\n\n" +
+                           $"📄 Вывод:\n<pre>{output}</pre>";
+                }
+                else
+                {
+                    string error = result.TryGetProperty("error", out var err) ? err.GetString() : "Неизвестная ошибка";
+                    return $"❌ Ошибка при создании задачи:\n{error}";
+                }
+            }
+            catch (Exception ex)
+            {
+                return $"❌ Критическая ошибка: {ex.Message}";
+            }
+        }
+
+        private async Task<string> HandleTimersAsync(Message message)
+        {
+            long chatId = message.Chat.Id;
+            var tool = _tools.FirstOrDefault(t => t.Name == "SystemdRun");
+            if (tool == null) return "❌ Инструмент SystemdRun не загружен.";
+
+            var toolArgs = new Dictionary<string, object>
+            {
+                { "action", "list" },
+                { "use_sudo", _accessControl.IsAdmin(chatId) }
+            };
+
+            try
+            {
+                string jsonResult = await tool.ExecuteAsync(toolArgs, chatId);
+                var result = JsonSerializer.Deserialize<JsonElement>(jsonResult);
+
+                if (result.TryGetProperty("success", out var success) && success.GetBoolean())
+                {
+                    string output = result.GetProperty("output").GetString() ?? "";
+                    if (string.IsNullOrWhiteSpace(output)) return "📋 Список таймеров пуст.";
+                    return $"📋 Список таймеров:\n<pre>{output}</pre>";
+                }
+                else
+                {
+                    string error = result.TryGetProperty("error", out var err) ? err.GetString() : "Неизвестная ошибка";
+                    return $"❌ Ошибка при получении списка:\n{error}";
+                }
+            }
+            catch (Exception ex)
+            {
+                return $"❌ Критическая ошибка: {ex.Message}";
+            }
+        }
+
+        private async Task<string> HandleStopRunAsync(Message message)
+        {
+            long chatId = message.Chat.Id;
+            string unit = ExtractArgument(message.Text!);
+
+            if (string.IsNullOrWhiteSpace(unit))
+                return "⚠️ Использование: /stoprun <unit_name>";
+
+            var tool = _tools.FirstOrDefault(t => t.Name == "SystemdRun");
+            if (tool == null) return "❌ Инструмент SystemdRun не загружен.";
+
+            var toolArgs = new Dictionary<string, object>
+            {
+                { "action", "stop" },
+                { "unit", unit },
+                { "use_sudo", _accessControl.IsAdmin(chatId) }
+            };
+
+            try
+            {
+                string jsonResult = await tool.ExecuteAsync(toolArgs, chatId);
+                var result = JsonSerializer.Deserialize<JsonElement>(jsonResult);
+
+                if (result.TryGetProperty("success", out var success) && success.GetBoolean())
+                {
+                    return $"✅ Задача {unit} остановлена (юниты остановлены).";
+                }
+                else
+                {
+                    string error = result.TryGetProperty("error", out var err) ? err.GetString() : "Неизвестная ошибка";
+                    return $"❌ Ошибка при остановке задачи:\n{error}";
+                }
+            }
+            catch (Exception ex)
+            {
+                return $"❌ Критическая ошибка: {ex.Message}";
+            }
         }
     }
 }

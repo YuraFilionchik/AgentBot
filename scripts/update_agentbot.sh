@@ -40,6 +40,14 @@ dotnet publish -c Release -r linux-x64 --self-contained false -o "$PUBLISH_DIR" 
 echo "🔄 Восстановление настроек из бэкапа..."
 "$INITIAL_PWD/backup_bot.sh" restore
 
+echo "🔄 Восстановление прав доступа к скриптам...  "
+chown root:root $INITIAL_PWD/backup_bot.sh
+chown root:root $INITIAL_PWD/restart_agentbot.sh
+chown root:root $INITIAL_PWD/update_agentbot.sh
+chmod +x $INITIAL_PWD/backup_bot.sh
+chmod +x $INITIAL_PWD/restart_agentbot.sh
+chmod +x $INITIAL_PWD/update_agentbot.sh
+
 # 5. Перезапуск сервиса
 echo "🔄 Запланирован перезапуск сервиса $SERVICE_NAME..."
 

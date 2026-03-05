@@ -46,7 +46,26 @@ builder.Services.AddSingleton<ILlmWrapper, LlmWrapper>();
 
 // Боты и ИИ-агенты
 builder.Services.AddSingleton<IBotProvider, TelegramBotProvider>();
-builder.Services.AddSingleton<IAiAgent, GeminiAiAgent>();
+
+// Регистрация доступных ИИ-агентов
+builder.Services.AddSingleton<GeminiAiAgent>();
+builder.Services.AddSingleton<GrokAgent>();
+builder.Services.AddSingleton<OpenAiAgent>();
+
+// Фабрика для выбора ИИ-агента на основе конфигурации
+builder.Services.AddSingleton<IAiAgent>(sp =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    var provider = config["AiAgent:Provider"]?.ToLowerInvariant() ?? "gemini";
+
+    return provider switch
+    {
+        "gemini" => sp.GetRequiredService<GeminiAiAgent>(),
+        "grok" => sp.GetRequiredService<GrokAgent>(),
+        "openai" => sp.GetRequiredService<OpenAiAgent>(),
+        _ => sp.GetRequiredService<GeminiAiAgent>()
+    };
+});
 
 // Обработчики
 builder.Services.AddSingleton<CommandHandler>();

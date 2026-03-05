@@ -61,7 +61,7 @@ namespace AgentBot.AiAgents
             }));
 
             // Формируем системный промпт
-            string systemPrompt = _llmWrapper.BuildSystemPromptAsync(userContext);
+            string systemPrompt = _llmWrapper.BuildSystemPrompt(userContext);
 
             // Преобразуем сообщение с учётом алиасов
             string processedMessage = await _llmWrapper.BuildUserMessageAsync(chatId, message);
@@ -69,20 +69,14 @@ namespace AgentBot.AiAgents
             // Получаем историю чата
             var history = await _memory.GetHistoryAsync(chatId, 20);
 
-            // Добавляем системный промпт как первое сообщение (если история пуста)
-            if (history.Count == 0)
-            {
-                var systemContent = new Content { Role = "user" };
-                systemContent.Parts ??= new ();
-                systemContent.Parts.Add(new Part { Text = systemPrompt });
-                history.Add(systemContent);
-            }
-
             // Добавляем сообщение пользователя в историю
             var userContent = new Content { Role = "user" };
             userContent.Parts ??= new ();
             userContent.Parts.Add(new Part { Text = processedMessage });
             history.Add(userContent);
+
+            // Сохраняем сообщение пользователя в постоянную историю
+            await _memory.AddMessageAsync(chatId, userContent);
 
             // Подготовка инструментов
             var functionDeclarations = tools.Select(ConvertToFunctionDeclaration).ToList();
@@ -94,7 +88,13 @@ namespace AgentBot.AiAgents
             {
                 try
                 {
-                    var config = new GenerateContentConfig();
+                    var config = new GenerateContentConfig
+                    {
+                        SystemInstruction = new Content
+                        {
+                            Parts = new List<Part> { new Part { Text = systemPrompt } }
+                        }
+                    };
                     config.Tools ??= new List<Tool>();
                     config.Tools.Add(tool);
                     config.ToolConfig = new ToolConfig

@@ -16,7 +16,6 @@ namespace AgentBot.Services
     {
         private readonly ICronTaskService _cronTaskService;
         private readonly IAiAgent _aiAgent;
-        private readonly IBotProvider _botProvider;
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<CronTaskRunner> _logger;
         private readonly List<IToolFunction> _tools;

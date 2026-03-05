@@ -9,6 +9,7 @@ using Telegram.Bot;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace AgentBot.Bots
 {
@@ -82,16 +83,38 @@ namespace AgentBot.Bots
             return Task.CompletedTask;
         }
 
-        public async Task SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default)
+        public async Task SendMessageAsync(long chatId, string text, ReplyMarkup? replyMarkup = null, ParseMode? parseMode = null, CancellationToken cancellationToken = default)
         {
             try
             {
-                await _client.SendMessage(new ChatId(chatId), text, cancellationToken: cancellationToken);
+                await _client.SendMessage(
+                    chatId: new ChatId(chatId),
+                    text: text,
+                    replyMarkup: replyMarkup,
+                    parseMode: parseMode ?? default,
+                    cancellationToken: cancellationToken);
+
                 _logger.LogDebug("Sent message to chat {ChatId}: {MessageText}", chatId, text);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error sending message to chat {ChatId}", chatId);
+            }
+        }
+
+        public async Task AnswerCallbackQueryAsync(string callbackQueryId, string? text = null, bool showAlert = false, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await _client.AnswerCallbackQuery(
+                    callbackQueryId: callbackQueryId,
+                    text: text,
+                    showAlert: showAlert,
+                    cancellationToken: cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error answering callback query {CallbackId}", callbackQueryId);
             }
         }
 

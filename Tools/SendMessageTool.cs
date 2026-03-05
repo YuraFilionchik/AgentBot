@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -31,14 +32,16 @@ namespace AgentBot.Tools
             { "inline_buttons", "array" } // Опционально: массив inline-кнопок
         };
 
-        private readonly IBotProvider _botProvider;
+        private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<SendMessageTool> _logger;
 
+        private IBotProvider BotProvider => _serviceProvider.GetRequiredService<IBotProvider>();
+
         public SendMessageTool(
-            IBotProvider botProvider,
+            IServiceProvider serviceProvider,
             ILogger<SendMessageTool> logger)
         {
-            _botProvider = botProvider ?? throw new ArgumentNullException(nameof(botProvider));
+            _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
             _logger = logger;
         }
 
@@ -76,7 +79,7 @@ namespace AgentBot.Tools
 
                 _logger.LogInformation("Отправка сообщения в чат {ChatId}", chatId);
 
-                await _botProvider.SendMessageAsync(
+                await BotProvider.SendMessageAsync(
                     chatId: chatId,
                     text: text,
                     replyMarkup: inlineKeyboard,

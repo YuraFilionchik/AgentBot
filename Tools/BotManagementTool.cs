@@ -81,8 +81,9 @@ namespace AgentBot.Tools
         {
             _logger.LogInformation("BotManager: starting update");
             // update_agentbot.sh uses INITIAL_PWD=$(pwd) to locate backup_bot.sh,
-            // so we must cd into the scripts directory before running it
-            return await RunScriptAsync($"cd {_scriptsDir} && bash update_agentbot.sh");
+            // so we must cd into the scripts directory before running it.
+            // Using systemd-run ensures the update process is in a separate transient unit.
+            return await RunScriptAsync($"cd {_scriptsDir} && sudo systemd-run --collect bash update_agentbot.sh");
         }
 
         private async Task<string> HandleBackupAsync()

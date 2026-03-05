@@ -385,10 +385,11 @@ namespace AgentBot.Handlers
                 try
                 {
                     // update_agentbot.sh uses INITIAL_PWD=$(pwd) to locate backup_bot.sh,
-                    // so we must cd into the scripts directory before running it
-                    string output = await RunScriptAsync("cd scripts && bash update_agentbot.sh");
+                    // so we must cd into the scripts directory before running it.
+                    // Using systemd-run ensures the update process is in a separate transient unit.
+                    string output = await RunScriptAsync("cd scripts && sudo systemd-run --collect bash update_agentbot.sh");
                     _logger.LogInformation("Обновление завершено: {Output}", output);
-                    await BotProvider.SendMessageAsync(chatId, $"✅ Обновление завершено:\n\n```\n{output}\n```");
+                    await BotProvider.SendMessageAsync(chatId, $"✅ Обновление запущено через systemd-run:\n\n```\n{output}\n```");
                 }
                 catch (Exception ex)
                 {

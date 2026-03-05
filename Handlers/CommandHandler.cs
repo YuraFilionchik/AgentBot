@@ -20,6 +20,7 @@ namespace AgentBot.Handlers
         private readonly List<IToolFunction> _tools;
         private readonly IAliasService _aliasService;
         private readonly ICronTaskService _cronTaskService;
+        private readonly IKeyboardService _keyboardService;
         private readonly AccessControlService _accessControl;
 
         private readonly Dictionary<string, Func<Message, Task<string>>> _commandHandlers;
@@ -34,6 +35,7 @@ namespace AgentBot.Handlers
             IEnumerable<IToolFunction> tools,
             IAliasService aliasService,
             ICronTaskService cronTaskService,
+            IKeyboardService keyboardService,
             AccessControlService accessControl)
         {
             _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
@@ -41,6 +43,7 @@ namespace AgentBot.Handlers
             _tools = tools?.ToList() ?? new List<IToolFunction>();
             _aliasService = aliasService ?? throw new ArgumentNullException(nameof(aliasService));
             _cronTaskService = cronTaskService ?? throw new ArgumentNullException(nameof(cronTaskService));
+            _keyboardService = keyboardService ?? throw new ArgumentNullException(nameof(keyboardService));
             _accessControl = accessControl ?? throw new ArgumentNullException(nameof(accessControl));
 
 
@@ -99,7 +102,10 @@ namespace AgentBot.Handlers
                 {
                     string response = await handler(message);
                     if (!string.IsNullOrWhiteSpace(response))
-                        await BotProvider.SendMessageAsync(chatId, response);
+                    {
+                        var keyboard = await _keyboardService.GetMainKeyboardAsync(chatId);
+                        await BotProvider.SendMessageAsync(chatId, response, replyMarkup: keyboard);
+                    }
                     return true;
                 }
                 catch (Exception ex)

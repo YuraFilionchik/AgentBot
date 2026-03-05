@@ -31,20 +31,14 @@ namespace AgentBot.Tools
             { "inline_buttons", "array" } // Опционально: массив inline-кнопок
         };
 
-        private readonly TelegramBotClient _client;
+        private readonly IBotProvider _botProvider;
         private readonly ILogger<SendMessageTool> _logger;
 
         public SendMessageTool(
-            IConfiguration configuration,
+            IBotProvider botProvider,
             ILogger<SendMessageTool> logger)
         {
-            var token = configuration["Bots:Telegram:ApiToken"];
-            if (string.IsNullOrEmpty(token))
-            {
-                throw new ArgumentException("Telegram API token is not configured.");
-            }
-
-            _client = new TelegramBotClient(token);
+            _botProvider = botProvider ?? throw new ArgumentNullException(nameof(botProvider));
             _logger = logger;
         }
 
@@ -82,42 +76,11 @@ namespace AgentBot.Tools
 
                 _logger.LogInformation("Отправка сообщения в чат {ChatId}", chatId);
 
-                // Отправляем сообщение с клавиатурой или без.
-                // Если parseMode не указан — вызываем перегрузку без параметра.
-                if (inlineKeyboard != null)
-                {
-                    if (parseMode.HasValue)
-                    {
-                        await _client.SendMessage(
-                            chatId: new ChatId(chatId),
-                            text: text,
-                            parseMode: parseMode.Value,
-                            replyMarkup: inlineKeyboard);
-                    }
-                    else
-                    {
-                        await _client.SendMessage(
-                            chatId: new ChatId(chatId),
-                            text: text,
-                            replyMarkup: inlineKeyboard);
-                    }
-                }
-                else
-                {
-                    if (parseMode.HasValue)
-                    {
-                        await _client.SendMessage(
-                            chatId: new ChatId(chatId),
-                            text: text,
-                            parseMode: parseMode.Value);
-                    }
-                    else
-                    {
-                        await _client.SendMessage(
-                            chatId: new ChatId(chatId),
-                            text: text);
-                    }
-                }
+                await _botProvider.SendMessageAsync(
+                    chatId: chatId,
+                    text: text,
+                    replyMarkup: inlineKeyboard,
+                    parseMode: parseMode);
 
                 return JsonSerializer.Serialize(new
                 {

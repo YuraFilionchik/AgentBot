@@ -1,6 +1,9 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Telegram.Bot.Types;
+using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace AgentBot
 {
@@ -17,7 +20,12 @@ namespace AgentBot
         /// <summary>
         /// Отправляет текстовое сообщение в указанный чат.
         /// </summary>
-        Task SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default);
+        Task SendMessageAsync(long chatId, string text, ReplyMarkup? replyMarkup = null, ParseMode? parseMode = null, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Подтверждает получение callback-запроса (убирает "крутилку" на кнопке).
+        /// </summary>
+        Task AnswerCallbackQueryAsync(string callbackQueryId, string? text = null, bool showAlert = false, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Отправляет файл в указанный чат.

@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using Telegram.Bot.Types;
+using AgentBot.Services;
 
 namespace AgentBot.Handlers
 {
@@ -18,19 +19,22 @@ namespace AgentBot.Handlers
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<MessageProcessor> _logger;
         private readonly List<IToolFunction> _tools;
+        private readonly IKeyboardService _keyboardService;
 
         public MessageProcessor(
             CommandHandler commandHandler,
             IAiAgent aiAgent,
             IServiceProvider serviceProvider,
             ILogger<MessageProcessor> logger,
-            IEnumerable<IToolFunction> tools)
+            IEnumerable<IToolFunction> tools,
+            IKeyboardService keyboardService)
         {
             _commandHandler = commandHandler ?? throw new ArgumentNullException(nameof(commandHandler));
             _aiAgent = aiAgent ?? throw new ArgumentNullException(nameof(aiAgent));
             _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _tools = tools?.ToList() ?? new List<IToolFunction>();
+            _keyboardService = keyboardService ?? throw new ArgumentNullException(nameof(keyboardService));
         }
 
         private IBotProvider BotProvider => _serviceProvider.GetRequiredService<IBotProvider>();
@@ -70,7 +74,8 @@ namespace AgentBot.Handlers
 
                 if (!string.IsNullOrWhiteSpace(response))
                 {
-                    await BotProvider.SendMessageAsync(chatId, response);
+                    var keyboard = await _keyboardService.GetMainKeyboardAsync(chatId);
+                    await BotProvider.SendMessageAsync(chatId, response, replyMarkup: keyboard);
                 }
             }
             catch (Exception ex)
@@ -97,8 +102,8 @@ namespace AgentBot.Handlers
                 // Пока просто подтверждаем получение
                 await BotProvider.SendMessageAsync(chatId, $"Получена команда: {data}");
 
-                // Подтверждаем callback
-                // await BotProvider.AnswerCallbackQueryAsync(callbackQuery.Id);
+                // Подтверждаем callback (убирает "крутилку" на кнопке)
+                await BotProvider.AnswerCallbackQueryAsync(callbackQuery.Id, $"Вы выбрали: {data}");
             }
             catch (Exception ex)
             {

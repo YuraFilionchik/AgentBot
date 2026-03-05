@@ -93,13 +93,8 @@ case "$ACTION" in
     make)
         make_backup
         ;;
-    restore)
-        read -p "⚠️ Вы уверены, что хотите перезаписать файлы в $SOURCE_DIR? (y/n): " confirm
-        if [[ $confirm == [yY] ]]; then
-            restore_backup
-        else
-            echo "Отмена."
-        fi
+    restore)       
+        restore_backup
         ;;
     *)
         echo "Использование: $0 {make|restore} (по умолчанию: make)"

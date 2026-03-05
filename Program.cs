@@ -82,6 +82,7 @@ builder.Services.AddTransient<IToolFunction, SendMessageTool>();
 builder.Services.AddTransient<IToolFunction, SendFileTool>();
 builder.Services.AddTransient<IToolFunction, CronTool>();
 builder.Services.AddTransient<IToolFunction, BotManagementTool>();
+builder.Services.AddTransient<IToolFunction, SystemdRunTool>();
 // builder.Services.AddTransient<IToolFunction, DatabaseTool>(); // Когда будет реализован
 
 // Фоновые сервисы

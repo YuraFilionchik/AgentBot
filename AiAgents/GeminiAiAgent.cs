@@ -126,14 +126,8 @@ namespace AgentBot.AiAgents
 
                     if (functionCallParts.Any())
                     {
-                        // НЕ сохраняем function call в персистентную историю,
-                        // а добавляем только в текущий список history для следующего запроса
-                        var functionCallContent = new Content
-                        {
-                            Role = "model",
-                            Parts = functionCallParts.Select(p => new Part { FunctionCall = p.FunctionCall }).ToList()
-                        };
-                        history.Add(functionCallContent);
+                        // Добавляем оригинальный content от модели целиком, чтобы сохранить thought signatures
+                        history.Add(content);
 
                         var toolResponseParts = new List<Part>();
 

@@ -19,7 +19,6 @@ var builder = Host.CreateApplicationBuilder(args);
 var configPath = Path.Combine(AppContext.BaseDirectory, "Config", "appsettings.json");
 builder.Configuration.AddJsonFile(configPath, optional: false, reloadOnChange: true);
 
-
 // Логи (Serilog только в файл)
 builder.Logging.ClearProviders();
 builder.Logging.AddSerilog(new LoggerConfiguration()
@@ -63,6 +62,7 @@ builder.Services.AddTransient<IToolFunction, WeatherTool>();
 builder.Services.AddTransient<IToolFunction, SendMessageTool>();
 builder.Services.AddTransient<IToolFunction, SendFileTool>();
 builder.Services.AddTransient<IToolFunction, CronTool>();
+builder.Services.AddTransient<IToolFunction, BotManagementTool>();
 // builder.Services.AddTransient<IToolFunction, DatabaseTool>(); // Когда будет реализован
 
 // Фоновые сервисы

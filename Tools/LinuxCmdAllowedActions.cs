@@ -29,7 +29,10 @@ namespace AgentBot.Tools
             
             // Файловые операции
             "create_file",        // Создание файла (touch/echo)
-            "edit_file",          // Редактирование (echo/sed)
+            "edit_file",          // Добавление текста в конец файла (echo >>)
+            "write_file",         // Перезапись содержимого файла целиком (tee)
+            "replace_in_file",    // Замена строки/подстроки в файле (sed -i)
+            "insert_line",        // Вставка текста на указанную строку (sed -i)
             "delete_file",        // Удаление файла (rm)
             "copy_file",          // Копирование (cp)
             "move_file",          // Перемещение (mv)

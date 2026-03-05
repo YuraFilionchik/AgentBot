@@ -37,12 +37,17 @@ namespace AgentBot.Tools
         public string Description =>
             "Execute Linux commands on the host system. " +
             "Supports: view_log, read_file, head_file, tail_file, grep, find, wc, sort, uniq, diff, " +
-            "create_file, edit_file, delete_file, copy_file, move_file, list_dir, make_dir, remove_dir, " +
+            "create_file, edit_file (append), write_file (overwrite), replace_in_file (sed find/replace), insert_line (insert at line#), " +
+            "delete_file, copy_file, move_file, list_dir, make_dir, remove_dir, " +
             "service_status, service_start, service_stop, service_restart, process_list, process_kill, " +
             "disk_usage, memory_usage, cpu_info, os_info, network_info, port_check, " +
             "run_script, run_python, tar_create, tar_extract, zip_create, zip_extract, " +
             "journalctl, dmesg, date, uptime, whoami, pwd, file_info, " +
             "ping, curl, wget, dns_lookup, env_list, env_get. " +
+            "FILE EDITING: Use 'write_file' to overwrite a file entirely (content=new text). " +
+            "Use 'replace_in_file' to find/replace text (pattern=old text, content=new text, options='g' for all occurrences). " +
+            "Use 'insert_line' to insert text at a line number (content=text, options=line_number). " +
+            "Use 'edit_file' to append text to the end of a file (content=text to append). " +
             "IMPORTANT: For absolute paths (e.g., /etc, /var/log) or system-wide operations, set allow_any_path=true. " +
             "For sudo operations (service management, system logs), set use_sudo=true. " +
             "Admin users have extended privileges - check user role with /whoami command before using allow_any_path or use_sudo. " +
@@ -434,9 +439,12 @@ namespace AgentBot.Tools
                 "diff" => $"{sudo}diff {options} \"{fullPath}\" \"{pattern}\"",
                 
                 // Файловые операции
-                "create_file" => $"{sudo}touch \"{fullPath}\"",
-                "edit_file" => $"{sudo}echo \"{EscapeContent(content)}\" >> \"{fullPath}\"",
-                "delete_file" => $"{sudo}rm \"{fullPath}\"",
+                    "create_file" => $"{sudo}touch \"{fullPath}\"",
+                    "edit_file" => $"{sudo}echo \"{EscapeContent(content)}\" >> \"{fullPath}\"",
+                    "write_file" => BuildWriteFileCommand(sudo, fullPath, content),
+                    "replace_in_file" => BuildReplaceInFileCommand(sudo, fullPath, pattern, content, options),
+                    "insert_line" => BuildInsertLineCommand(sudo, fullPath, content, options),
+                    "delete_file" => $"{sudo}rm \"{fullPath}\"",
                 "copy_file" => $"{sudo}cp {options} \"{fullPath}\" \"{pattern}\"",
                 "move_file" => $"{sudo}mv {options} \"{fullPath}\" \"{pattern}\"",
                 "list_dir" => $"{sudo}ls {options} \"{fullPath}\"",
@@ -497,6 +505,65 @@ namespace AgentBot.Tools
         private string EscapeContent(string content)
         {
             return content.Replace("\"", "\\\"").Replace("$", "\\$").Replace("`", "\\`");
+        }
+
+        /// <summary>
+        /// Перезаписывает файл целиком, используя heredoc через tee.
+        /// </summary>
+        private static string BuildWriteFileCommand(string sudo, string fullPath, string content)
+        {
+            if (string.IsNullOrWhiteSpace(content))
+                return $"{sudo}truncate -s 0 \"{fullPath}\"";
+
+            // Используем printf + tee для безопасной записи (без интерпретации спецсимволов)
+            return $"printf '%s' '{EscapeSingleQuoted(content)}' | {sudo}tee \"{fullPath}\" > /dev/null";
+        }
+
+        /// <summary>
+        /// Заменяет первое или все вхождения подстроки в файле через sed.
+        /// pattern = искомая строка, content = замена, options может содержать "g" для замены всех вхождений.
+        /// </summary>
+        private static string BuildReplaceInFileCommand(string sudo, string fullPath, string pattern, string content, string options)
+        {
+            if (string.IsNullOrWhiteSpace(pattern))
+                return "echo 'Error: pattern (old text) is required for replace_in_file'";
+
+            // Экранируем разделитель sed и спецсимволы
+            string escapedPattern = EscapeSed(pattern);
+            string escapedContent = EscapeSed(content);
+            string flags = options?.Contains("g", System.StringComparison.OrdinalIgnoreCase) == true ? "g" : "";
+
+            return $"{sudo}sed -i 's/{escapedPattern}/{escapedContent}/{flags}' \"{fullPath}\"";
+        }
+
+        /// <summary>
+        /// Вставляет строку текста перед указанным номером строки через sed.
+        /// options = номер строки (например "5"), content = текст для вставки.
+        /// </summary>
+        private static string BuildInsertLineCommand(string sudo, string fullPath, string content, string options)
+        {
+            if (string.IsNullOrWhiteSpace(content))
+                return "echo 'Error: content is required for insert_line'";
+
+            if (!int.TryParse(options?.Trim(), out int lineNumber) || lineNumber < 1)
+                return "echo 'Error: options must contain a valid line number (>= 1) for insert_line'";
+
+            string escapedContent = EscapeSed(content);
+            return $"{sudo}sed -i '{lineNumber}i\\{escapedContent}' \"{fullPath}\"";
+        }
+
+        /// <summary>
+        /// Экранирует спецсимволы для использования внутри sed выражения.
+        /// </summary>
+        private static string EscapeSed(string input)
+        {
+            if (string.IsNullOrEmpty(input)) return string.Empty;
+            // Экранируем: / \ & и символ новой строки
+            return input
+                .Replace("\\", "\\\\")
+                .Replace("/", "\\/")
+                .Replace("&", "\\&")
+                .Replace("\n", "\\n");
         }
 
         private static string BuildRunScriptCommand(string sudo, string fullPath, string content, string options)

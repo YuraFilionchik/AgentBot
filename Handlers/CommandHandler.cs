@@ -58,7 +58,10 @@ namespace AgentBot.Handlers
                 ["/listcrons"]   = HandleListCronsAsync,
                 ["/deletecron"]  = HandleDeleteCronAsync,
                 ["/register"]    = HandleRegisterAsync,
-                ["/restart"]     = HandleRestartAsync
+                ["/restart"]     = HandleRestartAsync,
+                ["/backup"]      = HandleBackupAsync,
+                ["/restore"]     = HandleRestoreAsync,
+                ["/update"]      = HandleUpdateAsync
             };
         }
 
@@ -204,6 +207,12 @@ namespace AgentBot.Handlers
             "  /listaliases — показать все алиасы\n\n" +
             "🌤 /weather <город> — погода\n" +
             "📝 /note <текст> — сохранить заметку\n\n" +
+            "🔧 Администрирование:\n" +
+            "  /restart — перезапустить бота\n" +
+            "  /update — обновить бота (git pull + rebuild)\n" +
+            "  /backup — создать резервную копию\n" +
+            "  /restore [файл] — восстановить из бекапа\n" +
+            "  /register <пароль> — получить права админа\n\n" +
             "Просто пиши вопросы — отвечу через ИИ-агент ✨");
 
         private Task<string> HandleAboutAsync(Message message) => Task.FromResult(
@@ -272,54 +281,156 @@ namespace AgentBot.Handlers
         {
             long chatId = message.Chat.Id;
 
-            // Проверка прав администратора
             if (!_accessControl.IsAdmin(chatId))
-            {
                 return "❌ Доступ запрещён. Команда /restart доступна только администраторам.\n" +
                        "Используйте /register для получения прав администратора.";
-            }
 
-            // Запускаем перезагрузку в фоне
+            _logger.LogInformation("Chat {ChatId}: запуск перезагрузки бота", chatId);
+
+            // Запускаем скрипт перезагрузки в фоне, чтобы успеть отправить ответ
             _ = Task.Run(async () =>
             {
-                await Task.Delay(1000);
+                await Task.Delay(1500);
                 try
                 {
-                    // Попытка перезапуска через systemctl (для Linux)
-                    var startInfo = new ProcessStartInfo
-                    {
-                        FileName = "systemctl",
-                        Arguments = "restart agentbot",
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false
-                    };
-
-                    using var process = Process.Start(startInfo);
-                    if (process != null)
-                    {
-                        await process.WaitForExitAsync();
-                        if (process.ExitCode == 0)
-                        {
-                            _logger.LogInformation("Бот перезапущен через systemctl");
-                            return;
-                        }
-                    }
+                    await RunScriptAsync("scripts/restart_agentbot.sh");
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Если systemctl недоступен, просто завершаем процесс
-                    // systemd или docker автоматически перезапустит контейнер
+                    _logger.LogError(ex, "Ошибка при перезапуске через скрипт, аварийное завершение");
+                    Environment.Exit(0);
                 }
-
-                // Аварийное завершение процесса
-                _logger.LogWarning("Перезагрузка через завершение процесса");
-                Environment.Exit(0);
             });
 
-            return "🔄 Перезагрузка бота...\n\n" +
-                   "Бот будет перезапущен в течение нескольких секунд.\n" +
-                   "Если бот не запустился автоматически — проверьте логи.";
+            return "🔄 Перезагрузка бота...\n" +
+                   "Бот будет перезапущен через скрипт restart_agentbot.sh.";
+        }
+
+        private async Task<string> HandleBackupAsync(Message message)
+        {
+            long chatId = message.Chat.Id;
+
+            if (!_accessControl.IsAdmin(chatId))
+                return "❌ Доступ запрещён. Команда /backup доступна только администраторам.";
+
+            _logger.LogInformation("Chat {ChatId}: создание бекапа", chatId);
+
+            try
+            {
+                string output = await RunScriptAsync("scripts/backup_bot.sh", "make");
+                return $"💾 Бекап создан:\n\n```\n{output}\n```";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ошибка при создании бекапа");
+                return $"❌ Ошибка при создании бекапа: {ex.Message}";
+            }
+        }
+
+        private async Task<string> HandleRestoreAsync(Message message)
+        {
+            long chatId = message.Chat.Id;
+
+            if (!_accessControl.IsAdmin(chatId))
+                return "❌ Доступ запрещён. Команда /restore доступна только администраторам.";
+
+            string backupFile = ExtractArgument(message.Text!);
+            _logger.LogInformation("Chat {ChatId}: восстановление из бекапа {File}", chatId,
+                string.IsNullOrEmpty(backupFile) ? "(последний)" : backupFile);
+
+            try
+            {
+                string args = string.IsNullOrWhiteSpace(backupFile) ? "restore" : $"restore {backupFile}";
+                string output = await RunScriptAsync("scripts/backup_bot.sh", args);
+                return $"✅ Восстановление завершено:\n\n```\n{output}\n```";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ошибка при восстановлении из бекапа");
+                return $"❌ Ошибка при восстановлении: {ex.Message}";
+            }
+        }
+
+        private async Task<string> HandleUpdateAsync(Message message)
+        {
+            long chatId = message.Chat.Id;
+
+            if (!_accessControl.IsAdmin(chatId))
+                return "❌ Доступ запрещён. Команда /update доступна только администраторам.";
+
+            _logger.LogInformation("Chat {ChatId}: запуск обновления бота", chatId);
+
+            // Обновление занимает время — уведомляем и запускаем в фоне
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    // update_agentbot.sh uses INITIAL_PWD=$(pwd) to locate backup_bot.sh,
+                    // so we must cd into the scripts directory before running it
+                    string output = await RunScriptAsync("cd scripts && bash update_agentbot.sh");
+                    _logger.LogInformation("Обновление завершено: {Output}", output);
+                    await BotProvider.SendMessageAsync(chatId, $"✅ Обновление завершено:\n\n```\n{output}\n```");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Ошибка при обновлении бота");
+                    try
+                    {
+                        await BotProvider.SendMessageAsync(chatId, $"❌ Ошибка при обновлении: {ex.Message}");
+                    }
+                    catch { /* бот мог уже перезапуститься */ }
+                }
+            });
+
+            return "🔄 Обновление запущено...\n" +
+                   "Будет создан бекап, затем pull + rebuild + restart.\n" +
+                   "Результат придёт отдельным сообщением.";
+        }
+
+        // ────────────────────────────────────────────────
+        //  Shell script runner
+        // ────────────────────────────────────────────────
+
+        private async Task<string> RunScriptAsync(string scriptPath, string? arguments = null, string? stdinText = null)
+        {
+            string command = string.IsNullOrWhiteSpace(arguments)
+                ? scriptPath
+                : $"{scriptPath} {arguments}";
+
+            var processInfo = new ProcessStartInfo
+            {
+                FileName = "/bin/bash",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                RedirectStandardInput = stdinText is not null,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = Environment.CurrentDirectory
+            };
+            processInfo.ArgumentList.Add("-c");
+            processInfo.ArgumentList.Add(command);
+
+            using var process = new Process { StartInfo = processInfo };
+            process.Start();
+
+            if (stdinText is not null)
+            {
+                await process.StandardInput.WriteLineAsync(stdinText);
+                process.StandardInput.Close();
+            }
+
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+
+            await process.WaitForExitAsync();
+
+            string output = await outputTask;
+            string error = await errorTask;
+
+            if (process.ExitCode != 0)
+                throw new InvalidOperationException($"Script failed (exit {process.ExitCode}): {error.Trim()}");
+
+            return output.Trim();
         }
 
         // ────────────────────────────────────────────────

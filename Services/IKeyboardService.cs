@@ -33,5 +33,10 @@ namespace AgentBot.Services
         /// Получает все быстрые команды пользователя.
         /// </summary>
         Task<List<QuickCommand>> GetQuickCommandsAsync(long userId);
+
+        /// <summary>
+        /// Попробовать найти команду по текстовой метке кнопки.
+        /// </summary>
+        Task<string?> TryGetCommandByLabelAsync(long userId, string label);
     }
 }

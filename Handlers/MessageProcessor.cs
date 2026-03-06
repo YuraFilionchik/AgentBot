@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -58,7 +58,16 @@ namespace AgentBot.Handlers
 
             try
             {
-                // Если сообщение начинается с "/", обрабатываем как команду
+                // Проверяем, не является ли текст меткой кнопки
+                var commandRef = await _keyboardService.TryGetCommandByLabelAsync(chatId, text);
+                if (commandRef != null)
+                {
+                    _logger.LogInformation("Chat {ChatId}: текст '{Text}' распознан как кнопка -> {Command}", chatId, text, commandRef);
+                    message.Text = commandRef;
+                    text = commandRef;
+                }
+
+                // Если сообщение (или его замена) начинается с "/", обрабатываем как команду
                 if (text.StartsWith("/"))
                 {
                     _logger.LogInformation("Chat {ChatId}: обработка команды", chatId);

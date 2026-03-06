@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -68,7 +68,9 @@ namespace AgentBot.Handlers
                 ["/restart"]     = HandleRestartAsync,
                 ["/backup"]      = HandleBackupAsync,
                 ["/restore"]     = HandleRestoreAsync,
-                ["/update"]      = HandleUpdateAsync
+                ["/update"]      = HandleUpdateAsync,
+                ["/note"]        = HandleNoteAsync,
+                ["/weather"]     = HandleWeatherAsync
             };
         }
 
@@ -863,6 +865,47 @@ namespace AgentBot.Handlers
             {
                 return $"❌ Критическая ошибка: {ex.Message}";
             }
+        }
+
+        private async Task<string> HandleNoteAsync(Message message)
+        {
+            string text = ExtractArgument(message.Text!);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                // Если текст пустой — пытаемся получить список заметок
+                var tool = _tools.FirstOrDefault(t => t.Name == "list_notes");
+                if (tool == null) return "📝 Напишите текст заметки после команды /note или просто текстом — я сохраню её!";
+                
+                try
+                {
+                    string jsonRes = await tool.ExecuteAsync(new Dictionary<string, object> { { "user_id", message.Chat.Id.ToString() } }, message.Chat.Id);
+                    var notes = JsonSerializer.Deserialize<List<JsonElement>>(jsonRes);
+                    if (notes == null || notes.Count == 0) return "📝 У вас пока нет заметок. Напишите что-нибудь!";
+                    
+                    var sb = new System.Text.StringBuilder("📝 Ваши последние заметки:\n\n");
+                    foreach (var n in notes.Take(5))
+                    {
+                        sb.AppendLine($"• {n.GetProperty("content").GetString()}");
+                    }
+                    return sb.ToString();
+                }
+                catch { return "📝 Напишите текст заметки, и я её сохраню!"; }
+            }
+
+            // Если текст есть — вызываем AI, чтобы он сохранил или просто подтвердил
+            return "📝 Сохраняю заметку...";
+        }
+
+        private Task<string> HandleWeatherAsync(Message message)
+        {
+            string city = ExtractArgument(message.Text!);
+            if (string.IsNullOrWhiteSpace(city))
+            {
+                return Task.FromResult("🌤 Напишите город после /weather (например, /weather Москва)");
+            }
+
+            // Перенаправляем на AI для получения красивого отчёта
+            return Task.FromResult("🌤 Узнаю погоду...");
         }
     }
 }

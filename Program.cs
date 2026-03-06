@@ -83,7 +83,10 @@ builder.Services.AddTransient<IToolFunction, SendFileTool>();
 builder.Services.AddTransient<IToolFunction, CronTool>();
 builder.Services.AddTransient<IToolFunction, BotManagementTool>();
 builder.Services.AddTransient<IToolFunction, SystemdRunTool>();
-// builder.Services.AddTransient<IToolFunction, DatabaseTool>(); // Когда будет реализован
+builder.Services.AddTransient<IToolFunction, SaveNoteTool>();
+builder.Services.AddTransient<IToolFunction, GetNoteTool>();
+builder.Services.AddTransient<IToolFunction, ListNotesTool>();
+builder.Services.AddTransient<IToolFunction, DeleteNoteTool>();
 
 // Фоновые сервисы
 builder.Services.AddHostedService<BotWorker>();

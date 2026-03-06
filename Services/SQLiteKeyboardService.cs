@@ -183,5 +183,27 @@ namespace AgentBot.Services
 
             return commands;
         }
+
+        public async Task<string?> TryGetCommandByLabelAsync(long userId, string label)
+        {
+            if (string.IsNullOrWhiteSpace(label)) return null;
+
+            // 1. Проверяем стандартные команды
+            var defaultCmd = DefaultCommands.FirstOrDefault(c => c.Label.Equals(label, StringComparison.OrdinalIgnoreCase));
+            if (defaultCmd.Command != null)
+                return defaultCmd.Command;
+
+            // 2. Проверяем пользовательские команды из БД
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT Command FROM QuickCommands WHERE UserId = $userId AND Label = $label LIMIT 1;";
+            cmd.Parameters.AddWithValue("$userId", userId);
+            cmd.Parameters.AddWithValue("$label", label);
+
+            var result = await cmd.ExecuteScalarAsync();
+            return result?.ToString();
+        }
     }
 }

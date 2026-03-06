@@ -379,7 +379,29 @@ namespace AgentBot.Handlers
 
             _logger.LogInformation("Chat {ChatId}: запуск обновления бота", chatId);
 
-            // Обновление занимает время — уведомляем и запускаем в фоне
+            // Фаза 1: синхронная проверка наличия обновлений (вывод виден пользователю)
+            string checkOutput;
+            try
+            {
+                checkOutput = await RunScriptAsync("cd scripts && bash update_agentbot.sh --check");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ошибка при проверке обновлений");
+                return $"❌ Ошибка при проверке обновлений: {ex.Message}";
+            }
+
+            if (checkOutput.StartsWith("NO_UPDATES", StringComparison.Ordinal))
+            {
+                _logger.LogInformation("Chat {ChatId}: обновлений не найдено", chatId);
+                return $"✅ Обновлений нет. Текущая версия актуальна.\n\n{checkOutput}";
+            }
+
+            // Фаза 2: обновления найдены — запускаем сборку и перезапуск через systemd-run
+            string updateInfo = checkOutput.StartsWith("HAS_UPDATES", StringComparison.Ordinal)
+                ? $"📦 Найдены обновления:\n```\n{checkOutput}\n```"
+                : "📥 Первый запуск — клонирование репозитория.";
+
             _ = Task.Run(async () =>
             {
                 try
@@ -388,8 +410,8 @@ namespace AgentBot.Handlers
                     // so we must cd into the scripts directory before running it.
                     // Using systemd-run ensures the update process is in a separate transient unit.
                     string output = await RunScriptAsync("cd scripts && sudo systemd-run --collect bash update_agentbot.sh");
-                    _logger.LogInformation("Обновление завершено: {Output}", output);
-                    await BotProvider.SendMessageAsync(chatId, $"✅ Обновление запущено через systemd-run:\n\n```\n{output}\n```");
+                    _logger.LogInformation("Обновление запущено: {Output}", output);
+                    await BotProvider.SendMessageAsync(chatId, "🔄 Сборка и перезапуск запущены. Бот перезагрузится через несколько секунд...");
                 }
                 catch (Exception ex)
                 {
@@ -402,9 +424,7 @@ namespace AgentBot.Handlers
                 }
             });
 
-            return "🔄 Обновление запущено...\n" +
-                   "Будет создан бекап, затем pull + rebuild + restart.\n" +
-                   "Результат придёт отдельным сообщением.";
+            return $"{updateInfo}\n\n🔄 Запускаю сборку и перезапуск...\nРезультат придёт отдельным сообщением.";
         }
 
         // ────────────────────────────────────────────────

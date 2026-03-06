@@ -79,11 +79,31 @@ namespace AgentBot.Tools
 
         private async Task<string> HandleUpdateAsync()
         {
-            _logger.LogInformation("BotManager: starting update");
-            // update_agentbot.sh uses INITIAL_PWD=$(pwd) to locate backup_bot.sh,
-            // so we must cd into the scripts directory before running it.
-            // Using systemd-run ensures the update process is in a separate transient unit.
-            return await RunScriptAsync($"cd {_scriptsDir} && sudo systemd-run --collect bash update_agentbot.sh");
+            _logger.LogInformation("BotManager: checking for updates");
+
+            // Фаза 1: синхронная проверка наличия обновлений
+            string checkOutput;
+            try
+            {
+                checkOutput = await RunScriptAsync($"cd {_scriptsDir} && bash update_agentbot.sh --check");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "BotManager: update check failed");
+                return JsonSerializer.Serialize(new { success = false, error = $"Update check failed: {ex.Message}" });
+            }
+
+            if (checkOutput.StartsWith("NO_UPDATES", StringComparison.Ordinal))
+            {
+                _logger.LogInformation("BotManager: no updates available");
+                return JsonSerializer.Serialize(new { success = true, has_updates = false, output = checkOutput });
+            }
+
+            // Фаза 2: обновления найдены — запускаем полный цикл обновления
+            _logger.LogInformation("BotManager: updates found, starting build and restart");
+            var buildResult = await RunScriptAsync($"cd {_scriptsDir} && sudo systemd-run --collect bash update_agentbot.sh");
+
+            return JsonSerializer.Serialize(new { success = true, has_updates = true, changes = checkOutput, build = buildResult });
         }
 
         private async Task<string> HandleBackupAsync()

@@ -149,11 +149,15 @@ namespace AgentBot.Services
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
 
-            // Получаем текущую задачу
-            var task = await GetTaskByIdAsync(0, taskId); // UserId = 0 для системного доступа
-            if (task == null) return;
+            // Получаем cron-выражение задачи напрямую (без фильтрации по UserId)
+            var getCronCmd = connection.CreateCommand();
+            getCronCmd.CommandText = "SELECT CronExpression FROM CronTasks WHERE Id = $id;";
+            getCronCmd.Parameters.AddWithValue("$id", taskId);
 
-            var nextRun = GetNextOccurrence(task.CronExpression);
+            var cronExpr = await getCronCmd.ExecuteScalarAsync() as string;
+            if (string.IsNullOrEmpty(cronExpr)) return;
+
+            var nextRun = GetNextOccurrence(cronExpr);
 
             var command = connection.CreateCommand();
             command.CommandText = @"

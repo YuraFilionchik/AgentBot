@@ -18,6 +18,7 @@ namespace AgentBot.Bots
         private readonly TelegramBotClient _client;
         private readonly MessageProcessor _processor;
         private readonly ILogger<TelegramBotProvider> _logger;
+        private DateTime _startTimeUtc;
 
         public Func<long, string, Task>? OnMessageReceived { get; set; }
 
@@ -39,6 +40,8 @@ namespace AgentBot.Bots
 
         public async Task StartPollingAsync(CancellationToken cancellationToken = default)
         {
+            _startTimeUtc = DateTime.UtcNow;
+
             var receiverOptions = new ReceiverOptions
             {
                 AllowedUpdates = new[] { UpdateType.Message, UpdateType.CallbackQuery }
@@ -59,6 +62,15 @@ namespace AgentBot.Bots
         {
             try
             {
+                // Игнорируем сообщения, отправленные до запуска бота,
+                // чтобы избежать повторной обработки старых команд (например, "останови сервис agentbot")
+                var messageDate = update.Message?.Date ?? update.CallbackQuery?.Message?.Date;
+                if (messageDate.HasValue && messageDate.Value < _startTimeUtc)
+                {
+                    _logger.LogInformation("Пропущено старое сообщение от {Date} (бот запущен в {StartTime})", messageDate.Value, _startTimeUtc);
+                    return;
+                }
+
                 if (update.Message != null && update.Message.Text != null)
                 {
                     _logger.LogDebug("Received message from chat {ChatId}: {MessageText}", update.Message.Chat.Id, update.Message.Text);

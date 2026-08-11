@@ -24,7 +24,7 @@ namespace AgentBot.Models
 
         /// <summary>
         /// Значение алиаса.
-        /// Может быть командой (например, "/weather") или описанием (например, "приложение blazortool").
+        /// Может быть командой (например, "/status") или описанием (например, "приложение blazortool").
         /// </summary>
         public string Value { get; set; } = string.Empty;
 
@@ -50,7 +50,7 @@ namespace AgentBot.Models
     public enum AliasType
     {
         /// <summary>
-        /// Алиас команды (например, "погода" → "/weather").
+        /// Алиас команды (например, "статус" → "/status").
         /// </summary>
         Command = 0,
 

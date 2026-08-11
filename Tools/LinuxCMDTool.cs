@@ -53,6 +53,7 @@ namespace AgentBot.Tools
             "Admin users have extended privileges - check user role with /whoami command before using allow_any_path or use_sudo. " +
             "By default (allow_any_path=false), you can ONLY access files in allowed subdirectories (like logs/, data/, config/). " +
             "To access files in the root directory (like appsettings.json), you MUST set allow_any_path=true. " +
+            "Actions run_script, run_python, curl, wget, env_list, env_get are admin-only. " +
             "DO NOT prepend 'app/' or other base directory - the tool handles path resolution automatically.";
 
         public Dictionary<string, string> Parameters => new()
@@ -74,6 +75,20 @@ namespace AgentBot.Tools
         private readonly HashSet<string> _sudoAllowedActions;
         private readonly bool _allowSudo;
         private readonly AccessControlService _accessControl;
+
+        /// <summary>
+        /// Действия, доступные только администраторам: произвольное выполнение кода,
+        /// сетевые запросы и чтение переменных окружения (риск RCE/утечки секретов).
+        /// </summary>
+        private static readonly HashSet<string> AdminOnlyActions = new()
+        {
+            "run_script",   // bash -lc <content> — произвольное выполнение
+            "run_python",   // python3 <path> — произвольное выполнение
+            "curl",         // запросы в произвольные URL
+            "wget",         // загрузка файлов
+            "env_list",     // утечка переменных окружения (секреты)
+            "env_get"       // чтение переменной окружения
+        };
 
         public LinuxCMDTool(
             ILogger<LinuxCMDTool> logger,
@@ -166,6 +181,14 @@ namespace AgentBot.Tools
                 _logger.LogWarning("LinuxCMD: Действие {Action} не найдено в разрешённых. Доступные: {AllowedActions}",
                     action, string.Join(", ", _allowedActions));
                 return JsonSerializer.Serialize(new { error = "Invalid action. Supported: " + string.Join(", ", _allowedActions) });
+            }
+
+            // Безопасность: действия, выполняющие произвольный код/сетевые запросы или
+            // раскрывающие окружение, доступны только администраторам.
+            if (AdminOnlyActions.Contains(action) && !_accessControl.IsAdmin(chatId))
+            {
+                _logger.LogWarning("LinuxCMD: Действие {Action} доступно только администраторам, chatId={ChatId}", action, chatId);
+                return JsonSerializer.Serialize(new { error = $"Access denied: action '{action}' requires admin privileges." });
             }
 
             // Извлечение строковых параметров с поддержкой разных типов

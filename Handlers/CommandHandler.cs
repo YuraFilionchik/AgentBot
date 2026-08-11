@@ -69,8 +69,11 @@ namespace AgentBot.Handlers
                 ["/backup"]      = HandleBackupAsync,
                 ["/restore"]     = HandleRestoreAsync,
                 ["/update"]      = HandleUpdateAsync,
-                ["/note"]        = HandleNoteAsync,
-                ["/weather"]     = HandleWeatherAsync
+                ["/stats"]       = HandleStatsAsync,
+                ["/admins"]      = HandleAdminsAsync,
+                ["/promote"]     = HandlePromoteAsync,
+                ["/revoke"]      = HandleRevokeAsync,
+                ["/broadcast"]   = HandleBroadcastAsync
             };
         }
 
@@ -96,6 +99,16 @@ namespace AgentBot.Handlers
             int atIndex = command.IndexOf('@');
             if (atIndex > 0)
                 command = command[..atIndex];
+
+            // Доступ только для администраторов: незарегистрированным пользователям
+            // разрешена только команда /register (защита от обхода через другие пути).
+            if (!_accessControl.IsAdmin(chatId) && !command.Equals("/register", StringComparison.Ordinal))
+            {
+                _logger.LogWarning("Команда {Command} отклонена для chatId={ChatId}: не администратор", command, chatId);
+                await BotProvider.SendMessageAsync(chatId,
+                    "🔒 Доступ только для администраторов.\nИспользуйте /register <пароль> для входа.");
+                return true;
+            }
 
             _logger.LogInformation("Команда {Command} от chatId={ChatId} ({Username})",
                 command, chatId, message.From?.Username);
@@ -192,19 +205,11 @@ namespace AgentBot.Handlers
 
         private Task<string> HandleStartAsync(Message message)
         {
-            string username = message.From?.FirstName ?? message.From?.Username ?? "путешественник";
             return Task.FromResult(
-                $"Привет, {username}! 👋\n" +
-                "Я умный бот с ИИ-агентом и системой алиасов.\n" +
-                "Пиши мне любые вопросы — постараюсь помочь.\n\n" +
-                "Доступные команды:\n" +
-                "/help — показать список команд\n" +
-                "/alias — управлять алиасами\n" +
-                "/listaliases — показать мои алиасы\n" +
-                "/weather <город> — узнать погоду\n" +
-                "/note <текст> — сохранить заметку\n" +
-                "/about — о боте\n" +
-                "/status — текущее состояние");
+                "Привет! 👋\n" +
+                "Я ИИ-помощник: отвечаю на вопросы, выполняю команды и автоматизирую задачи.\n" +
+                "Просто напиши, что нужно.\n\n" +
+                "/help — список команд");
         }
 
         private Task<string> HandleHelpAsync(Message message) => Task.FromResult(
@@ -226,9 +231,12 @@ namespace AgentBot.Handlers
             "  /run <delay> [\"desc\"] <cmd> — запустить задачу через время\n" +
             "  /timers — список всех таймеров\n" +
             "  /stoprun <unit> — остановить отложенную задачу\n\n" +
-            "🌤 /weather <город> — погода\n" +
-            "📝 /note <текст> — сохранить заметку\n\n" +
             "🔧 Администрирование:\n" +
+            "  /stats — статистика бота\n" +
+            "  /admins — список администраторов\n" +
+            "  /promote <chat_id> — выдать права админа\n" +
+            "  /revoke <chat_id> — отозвать права админа\n" +
+            "  /broadcast <текст> — рассылка всем пользователям\n" +
             "  /restart — перезапустить бота\n" +
             "  /update — обновить бота\n" +
             "  /backup — создать бекап\n" +
@@ -240,7 +248,7 @@ namespace AgentBot.Handlers
             "🤖 Этот бот создан на .NET 9 (Worker Service)\n" +
             "• Telegram API — Telegram.Bot\n" +
             "• ИИ — Google Gemini / OpenAI / Grok\n" +
-            "• Инструменты: погода, заметки, Linux-команды\n" +
+            "• Инструменты: Linux-команды, cron, системные операции\n" +
             "• Алиасы: персональная база знаний для ИИ\n" +
             "• Работает как systemd-сервис на Linux\n\n" +
             "Разработано для экспериментов и удовольствия 😄");
@@ -488,8 +496,8 @@ namespace AgentBot.Handlers
             {
                 return "📚 Управление алиасами:\n\n" +
                        "Создать алиас команды:\n" +
-                       "  /alias погода /weather\n" +
-                       "  /alias заметки /note\n\n" +
+                       "  /alias статус /status\n" +
+                       "  /alias задачи /listcrons\n\n" +
                        "Создать алиас знания:\n" +
                        "  /alias cymmes это приложение blazortool knowledge\n\n" +
                        "Удалить алиас:\n" +
@@ -503,7 +511,7 @@ namespace AgentBot.Handlers
             {
                 return "⚠️ Формат: /alias <имя> <значение> [type]\n" +
                        "type: command (по умолчанию) или knowledge\n" +
-                       "Пример: /alias погода /weather";
+                       "Пример: /alias статус /status";
             }
 
             string aliasName = parts[0];
@@ -564,7 +572,7 @@ namespace AgentBot.Handlers
             if (!allAliases.Any())
             {
                 return "📚 У вас пока нет алиасов.\n" +
-                       "Создайте первый: /alias погода /weather";
+                       "Создайте первый: /alias статус /status";
             }
 
             var commandAliases = allAliases.Where(a => a.Type == AliasType.Command).ToList();
@@ -867,45 +875,123 @@ namespace AgentBot.Handlers
             }
         }
 
-        private async Task<string> HandleNoteAsync(Message message)
+        // ────────────────────────────────────────────────
+        //  Администрирование (только для администраторов)
+        // ────────────────────────────────────────────────
+
+        private Task<string> HandleStatsAsync(Message message)
         {
+            long chatId = message.Chat.Id;
+            if (!_accessControl.IsAdmin(chatId))
+                return Task.FromResult("❌ Доступ запрещён. Статистика доступна только администраторам.");
+
+            var now = DateTime.UtcNow;
+            var uptime = now - _startTime;
+
+            long totalMessages = _userMessageCount.Values.Sum(v => (long)v);
+            long totalCommands = _commandStats.Values.Sum(v => (long)v);
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("📊 Статистика бота:");
+            sb.AppendLine($"Аптайм: {uptime.Days}д {uptime.Hours}ч {uptime.Minutes}м");
+            sb.AppendLine($"Активных пользователей: {_userMessageCount.Count}");
+            sb.AppendLine($"Всего сообщений: {totalMessages}");
+            sb.AppendLine($"Всего команд: {totalCommands}");
+            sb.AppendLine($"Администраторов: {_accessControl.AdminCount}");
+            sb.AppendLine();
+            sb.AppendLine("🏆 Топ команд:");
+            var top = _commandStats.OrderByDescending(kv => kv.Value).Take(5).ToList();
+            if (top.Count == 0)
+                sb.AppendLine("  (пока нет)");
+            else
+                foreach (var kv in top)
+                    sb.AppendLine($"  {kv.Key} — {kv.Value}");
+
+            return Task.FromResult(sb.ToString());
+        }
+
+        private Task<string> HandleAdminsAsync(Message message)
+        {
+            long chatId = message.Chat.Id;
+            if (!_accessControl.IsAdmin(chatId))
+                return Task.FromResult("❌ Доступ запрещён. Список администраторов доступен только администраторам.");
+
+            var admins = _accessControl.GetAdmins();
+            if (admins.Count == 0)
+                return Task.FromResult("👑 Администраторы не назначены.");
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"👑 Администраторы ({admins.Count}):");
+            foreach (var id in admins)
+                sb.AppendLine($"  `{id}`{(id == chatId ? " (вы)" : "")}");
+            return Task.FromResult(sb.ToString());
+        }
+
+        private async Task<string> HandlePromoteAsync(Message message)
+        {
+            long chatId = message.Chat.Id;
+            if (!_accessControl.IsAdmin(chatId))
+                return "❌ Доступ запрещён. Команда /promote доступна только администраторам.";
+
+            string args = ExtractArgument(message.Text!);
+            if (!long.TryParse(args, out long targetChatId) || targetChatId <= 0)
+                return "⚠️ Использование: /promote <chat_id>\nУкажите числовой Telegram Chat ID пользователя.";
+
+            bool added = await _accessControl.GrantAdminAsync(targetChatId);
+            return added
+                ? $"✅ Пользователь `{targetChatId}` назначен администратором."
+                : $"ℹ️ Пользователь `{targetChatId}` уже является администратором.";
+        }
+
+        private async Task<string> HandleRevokeAsync(Message message)
+        {
+            long chatId = message.Chat.Id;
+            if (!_accessControl.IsAdmin(chatId))
+                return "❌ Доступ запрещён. Команда /revoke доступна только администраторам.";
+
+            string args = ExtractArgument(message.Text!);
+            if (!long.TryParse(args, out long targetChatId) || targetChatId <= 0)
+                return "⚠️ Использование: /revoke <chat_id>\nУкажите числовой Telegram Chat ID администратора.";
+
+            if (targetChatId == chatId)
+                return "⚠️ Нельзя снять права с самого себя — можно потерять доступ к боту.";
+
+            bool removed = await _accessControl.RevokeAdminAsync(targetChatId);
+            return removed
+                ? $"✅ У пользователя `{targetChatId}` отозваны права администратора."
+                : $"ℹ️ Пользователь `{targetChatId}` не является администратором.";
+        }
+
+        private async Task<string> HandleBroadcastAsync(Message message)
+        {
+            long chatId = message.Chat.Id;
+            if (!_accessControl.IsAdmin(chatId))
+                return "❌ Доступ запрещён. Команда /broadcast доступна только администраторам.";
+
             string text = ExtractArgument(message.Text!);
             if (string.IsNullOrWhiteSpace(text))
+                return "⚠️ Использование: /broadcast <текст>\nОтправит сообщение всем известным пользователям.";
+
+            // Все чаты, которые писали боту, плюс администраторы (минус отправитель)
+            var recipients = new HashSet<long>(_userMessageCount.Keys);
+            foreach (var adminId in _accessControl.GetAdmins())
+                recipients.Add(adminId);
+            recipients.Remove(chatId);
+
+            if (recipients.Count == 0)
+                return "ℹ️ Нет получателей для рассылки.";
+
+            _logger.LogInformation("Chat {ChatId}: broadcast на {Count} получателей", chatId, recipients.Count);
+
+            int sent = 0;
+            foreach (var recipient in recipients)
             {
-                // Если текст пустой — пытаемся получить список заметок
-                var tool = _tools.FirstOrDefault(t => t.Name == "list_notes");
-                if (tool == null) return "📝 Напишите текст заметки после команды /note или просто текстом — я сохраню её!";
-                
-                try
-                {
-                    string jsonRes = await tool.ExecuteAsync(new Dictionary<string, object> { { "user_id", message.Chat.Id.ToString() } }, message.Chat.Id);
-                    var notes = JsonSerializer.Deserialize<List<JsonElement>>(jsonRes);
-                    if (notes == null || notes.Count == 0) return "📝 У вас пока нет заметок. Напишите что-нибудь!";
-                    
-                    var sb = new System.Text.StringBuilder("📝 Ваши последние заметки:\n\n");
-                    foreach (var n in notes.Take(5))
-                    {
-                        sb.AppendLine($"• {n.GetProperty("content").GetString()}");
-                    }
-                    return sb.ToString();
-                }
-                catch { return "📝 Напишите текст заметки, и я её сохраню!"; }
+                await BotProvider.SendMessageAsync(recipient, $"📢 {text}");
+                sent++;
             }
 
-            // Если текст есть — вызываем AI, чтобы он сохранил или просто подтвердил
-            return "📝 Сохраняю заметку...";
+            return $"📢 Рассылка выполнена: {sent} получателей.";
         }
 
-        private Task<string> HandleWeatherAsync(Message message)
-        {
-            string city = ExtractArgument(message.Text!);
-            if (string.IsNullOrWhiteSpace(city))
-            {
-                return Task.FromResult("🌤 Напишите город после /weather (например, /weather Москва)");
-            }
-
-            // Перенаправляем на AI для получения красивого отчёта
-            return Task.FromResult("🌤 Узнаю погоду...");
-        }
     }
 }

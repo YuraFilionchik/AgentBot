@@ -53,6 +53,13 @@ namespace AgentBot.Tools
                 return JsonSerializer.Serialize(new { error = "Sudo access denied: admin privileges required." });
             }
 
+            // Безопасность: планирование отложенных команд = произвольное выполнение команд
+            // на хосте, поэтому create доступен только администраторам.
+            if (action == "create" && !_accessControl.IsAdmin(chatId))
+            {
+                return JsonSerializer.Serialize(new { error = "Access denied: scheduling tasks requires admin privileges." });
+            }
+
             return action switch
             {
                 "create" => await HandleCreateAsync(args, useSudo),

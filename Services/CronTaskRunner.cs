@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using AgentBot.Security;
 using AgentBot.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -19,19 +20,33 @@ namespace AgentBot.Services
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<CronTaskRunner> _logger;
         private readonly List<IToolFunction> _tools;
+        private readonly AccessControlService _accessControl;
 
         public CronTaskRunner(
             ICronTaskService cronTaskService,
             IAiAgent aiAgent,
             IServiceProvider serviceProvider,
             ILogger<CronTaskRunner> logger,
-            IEnumerable<IToolFunction> tools)
+            IEnumerable<IToolFunction> tools,
+            AccessControlService accessControl)
         {
             _cronTaskService = cronTaskService;
             _aiAgent = aiAgent;
             _serviceProvider = serviceProvider;
             _logger = logger;
             _tools = tools?.ToList() ?? new List<IToolFunction>();
+            _accessControl = accessControl ?? throw new ArgumentNullException(nameof(accessControl));
+        }
+
+        /// <summary>
+        /// Инструменты для пользователя: SendMessage/SendFile только для администраторов.
+        /// </summary>
+        private List<IToolFunction> GetToolsForUser(long chatId)
+        {
+            if (_accessControl.IsAdmin(chatId))
+                return _tools;
+
+            return _tools.Where(t => t.Name is not ("SendMessage" or "SendFile")).ToList();
         }
 
         private IBotProvider BotProvider => _serviceProvider.GetRequiredService<IBotProvider>();
@@ -57,7 +72,7 @@ namespace AgentBot.Services
                             string response = await _aiAgent.ProcessMessageAsync(
                                 task.UserId,
                                 task.Description,
-                                _tools);
+                                GetToolsForUser(task.UserId));
 
                             // Отправляем результат пользователю
                             await BotProvider.SendMessageAsync(task.UserId,

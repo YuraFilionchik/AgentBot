@@ -115,6 +115,34 @@ namespace AgentBot.Security
         /// </summary>
         public int AdminCount => _adminChatIds.Count;
 
+        /// <summary>
+        /// Возвращает копию списка идентификаторов администраторов.
+        /// </summary>
+        public IReadOnlyList<long> GetAdmins()
+        {
+            return _adminChatIds.ToList();
+        }
+
+        /// <summary>
+        /// Назначает администратора напрямую (без пароля). Используется командой /promote.
+        /// </summary>
+        public async Task<bool> GrantAdminAsync(long chatId)
+        {
+            await _lock.WaitAsync();
+            try
+            {
+                if (!_adminChatIds.Add(chatId)) return false;
+                SaveAdminsToDisk();
+            }
+            finally
+            {
+                _lock.Release();
+            }
+
+            _logger.LogInformation("Администратор назначен напрямую: chatId={ChatId}", chatId);
+            return true;
+        }
+
         // ────────────────────────────────────────────────
         //  Персистентность
         // ────────────────────────────────────────────────

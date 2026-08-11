@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using Telegram.Bot.Types;
+using AgentBot.Security;
 using AgentBot.Services;
 
 namespace AgentBot.Handlers
@@ -20,6 +21,7 @@ namespace AgentBot.Handlers
         private readonly ILogger<MessageProcessor> _logger;
         private readonly List<IToolFunction> _tools;
         private readonly IKeyboardService _keyboardService;
+        private readonly AccessControlService _accessControl;
 
         public MessageProcessor(
             CommandHandler commandHandler,
@@ -27,7 +29,8 @@ namespace AgentBot.Handlers
             IServiceProvider serviceProvider,
             ILogger<MessageProcessor> logger,
             IEnumerable<IToolFunction> tools,
-            IKeyboardService keyboardService)
+            IKeyboardService keyboardService,
+            AccessControlService accessControl)
         {
             _commandHandler = commandHandler ?? throw new ArgumentNullException(nameof(commandHandler));
             _aiAgent = aiAgent ?? throw new ArgumentNullException(nameof(aiAgent));
@@ -35,10 +38,23 @@ namespace AgentBot.Handlers
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _tools = tools?.ToList() ?? new List<IToolFunction>();
             _keyboardService = keyboardService ?? throw new ArgumentNullException(nameof(keyboardService));
+            _accessControl = accessControl ?? throw new ArgumentNullException(nameof(accessControl));
         }
 
         private IBotProvider BotProvider => _serviceProvider.GetRequiredService<IBotProvider>();
 
+        /// <summary>
+        /// Возвращает инструменты, доступные пользователю чата.
+        /// SendMessage/SendFile отдаются только администраторам — иначе любой пользователь
+        /// может заставить бота отправлять сообщения/файлы куда угодно (спам/эксфильтрация).
+        /// </summary>
+        private List<IToolFunction> GetToolsForChat(long chatId)
+        {
+            if (_accessControl.IsAdmin(chatId))
+                return _tools;
+
+            return _tools.Where(t => t.Name is not ("SendMessage" or "SendFile")).ToList();
+        }
 
         public async Task ProcessAsync(Message message)
         {
@@ -67,6 +83,24 @@ namespace AgentBot.Handlers
                     text = commandRef;
                 }
 
+                // Доступ только для администраторов: незарегистрированным пользователям
+                // разрешена только команда /register. Зарегистрированный пользователь = администратор.
+                if (!_accessControl.IsAdmin(chatId))
+                {
+                    string firstToken = text.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+                    int atIndex = firstToken.IndexOf('@');
+                    if (atIndex > 0)
+                        firstToken = firstToken[..atIndex];
+
+                    if (!firstToken.Equals("/register", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogInformation("Chat {ChatId}: доступ запрещён (не администратор)", chatId);
+                        await BotProvider.SendMessageAsync(chatId,
+                            "🔒 Доступ только для администраторов.\nИспользуйте /register <пароль> для входа.");
+                        return;
+                    }
+                }
+
                 // Если сообщение (или его замена) начинается с "/", обрабатываем как команду
                 if (text.StartsWith("/"))
                 {
@@ -79,7 +113,7 @@ namespace AgentBot.Handlers
 
                 // Обрабатываем как обычное сообщение через ИИ-агент
                 _logger.LogInformation("Chat {ChatId}: отправка сообщения ИИ-агенту", chatId);
-                string response = await _aiAgent.ProcessMessageAsync(chatId, text, _tools);
+                string response = await _aiAgent.ProcessMessageAsync(chatId, text, GetToolsForChat(chatId));
 
                 if (!string.IsNullOrWhiteSpace(response))
                 {

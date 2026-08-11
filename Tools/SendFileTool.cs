@@ -16,13 +16,12 @@ namespace AgentBot.Tools
         public string Name => "SendFile";
 
         public string Description =>
-            "Отправить файл пользователю в Telegram. " +
-            "Используйте, когда нужно отправить документ, отчёт, лог-файл или другие данные. " +
+            "Отправить файл в текущий чат (Telegram). " +
+            "Файл всегда отправляется в чат, откуда пришёл запрос, — указывать chat_id не нужно. " +
             "Файл может быть создан из содержимого (content) или прочитан из пути (file_path).";
 
         public Dictionary<string, string> Parameters => new()
         {
-            { "chat_id", "number" },      // Telegram Chat ID
             { "file_name", "string" },    // Имя файла
             { "content", "string" },      // Содержимое файла (если создаётся на лету)
             { "file_path", "string" },    // Путь к файлу (если отправляется существующий)
@@ -42,29 +41,6 @@ namespace AgentBot.Tools
 
         private IBotProvider BotProvider => _serviceProvider.GetRequiredService<IBotProvider>();
 
-        private static bool TryGetLong(object? obj, out long value)
-        {
-            value = 0;
-            if (obj == null) return false;
-            
-            if (obj is long l) { value = l; return true; }
-            if (obj is int i) { value = i; return true; }
-            if (obj is double d) { value = (long)d; return true; }
-            
-            if (obj is JsonElement je)
-            {
-                if (je.ValueKind == JsonValueKind.Number && je.TryGetInt64(out value))
-                    return true;
-                if (je.ValueKind == JsonValueKind.String && long.TryParse(je.GetString(), out value))
-                    return true;
-            }
-            
-            if (long.TryParse(obj.ToString(), out value))
-                return true;
-                
-            return false;
-        }
-
         private static string GetStringArg(object? obj)
         {
             if (obj == null) return string.Empty;
@@ -78,9 +54,12 @@ namespace AgentBot.Tools
         {
             try
             {
-                if (!args.TryGetValue("chat_id", out var chatIdObj) || !TryGetLong(chatIdObj, out long chatId))
+                // Безопасность: файл отправляется ТОЛЬКО в чат, который инициировал обработку
+                // (серверный toolChatId). Переданный моделью chat_id игнорируется, чтобы исключить
+                // отправку в произвольные чаты (эксфильтрация/спам).
+                if (toolChatId <= 0)
                 {
-                    return JsonSerializer.Serialize(new { error = "chat_id обязателен и должен быть числом" });
+                    return JsonSerializer.Serialize(new { error = "Недоступен контекст чата для отправки файла." });
                 }
 
                 if (!args.TryGetValue("file_name", out var fileNameObj))
@@ -103,14 +82,14 @@ namespace AgentBot.Tools
                     if (!string.IsNullOrEmpty(content))
                     {
                         byte[] fileBytes = Encoding.UTF8.GetBytes(content);
-                        _logger.LogInformation("Отправка файла {FileName} в чат {ChatId} (из содержимого)", fileName, chatId);
-                        await BotProvider.SendFileAsync(chatId, fileBytes, fileName, caption);
+                        _logger.LogInformation("Отправка файла {FileName} в чат {ChatId} (из содержимого)", fileName, toolChatId);
+                        await BotProvider.SendFileAsync(toolChatId, fileBytes, fileName, caption);
 
                         return JsonSerializer.Serialize(new
                         {
                             success = true,
                             message = "Файл отправлен",
-                            chat_id = chatId,
+                            chat_id = toolChatId,
                             file_name = fileName,
                             size = fileBytes.Length
                         });
@@ -123,14 +102,14 @@ namespace AgentBot.Tools
                     string filePath = GetStringArg(pathObj);
                     if (!string.IsNullOrEmpty(filePath))
                     {
-                        _logger.LogInformation("Отправка файла {FilePath} в чат {ChatId}", filePath, chatId);
-                        await BotProvider.SendFileFromPathAsync(chatId, filePath, caption);
+                        _logger.LogInformation("Отправка файла {FilePath} в чат {ChatId}", filePath, toolChatId);
+                        await BotProvider.SendFileFromPathAsync(toolChatId, filePath, caption);
 
                         return JsonSerializer.Serialize(new
                         {
                             success = true,
                             message = "Файл отправлен",
-                            chat_id = chatId,
+                            chat_id = toolChatId,
                             file_name = fileName,
                             file_path = filePath
                         });

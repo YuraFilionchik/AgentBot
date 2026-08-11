@@ -21,9 +21,7 @@ namespace AgentBot.Services
         private static readonly List<(string Label, string Command)> DefaultCommands = new()
         {
             ("📋 Помощь", "/help"),
-            ("📝 Заметки", "/note"),
-            ("🌤 Погода", "/weather"),
-            ("📚 Алиасы", "/listaliases"),
+            (" Алиасы", "/listaliases"),
             ("⏰ Задачи", "/listcrons"),
             ("ℹ️ О боте", "/about")
         };

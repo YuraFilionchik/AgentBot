@@ -20,13 +20,12 @@ namespace AgentBot.Tools
         public string Name => "SendMessage";
 
         public string Description =>
-            "Отправить текстовое сообщение пользователю в Telegram. " +
-            "Поддерживает inline-кнопки для интерактивного взаимодействия. " +
-            "Используйте, когда нужно отправить сообщение от имени бота с кнопками действий.";
+            "Отправить текстовое сообщение в текущий чат (Telegram). " +
+            "Сообщение всегда отправляется в чат, откуда пришёл запрос, — указывать chat_id не нужно. " +
+            "Поддерживает inline-кнопки для интерактивного взаимодействия.";
 
         public Dictionary<string, string> Parameters => new()
         {
-            { "chat_id", "number" },      // Telegram Chat ID
             { "text", "string" },         // Текст сообщения
             { "parse_mode", "string" },   // Опционально: "Markdown" или "HTML"
             { "inline_buttons", "array" } // Опционально: массив inline-кнопок
@@ -49,9 +48,12 @@ namespace AgentBot.Tools
         {
             try
             {
-                if (!args.TryGetValue("chat_id", out var chatIdObj) || chatIdObj is not long chatId)
+                // Безопасность: сообщение отправляется ТОЛЬКО в чат, который инициировал обработку
+                // (серверный toolChatId). Переданный моделью chat_id игнорируется, чтобы исключить
+                // отправку в произвольные чаты (спам/фишинг).
+                if (toolChatId <= 0)
                 {
-                    return JsonSerializer.Serialize(new { error = "chat_id обязателен и должен быть числом" });
+                    return JsonSerializer.Serialize(new { error = "Недоступен контекст чата для отправки сообщения." });
                 }
 
                 if (!args.TryGetValue("text", out var textObj) || textObj is not string text)
@@ -77,10 +79,10 @@ namespace AgentBot.Tools
                     inlineKeyboard = BuildInlineKeyboard(buttonsObj);
                 }
 
-                _logger.LogInformation("Отправка сообщения в чат {ChatId}", chatId);
+                _logger.LogInformation("Отправка сообщения в чат {ChatId}", toolChatId);
 
                 await BotProvider.SendMessageAsync(
-                    chatId: chatId,
+                    chatId: toolChatId,
                     text: text,
                     replyMarkup: inlineKeyboard,
                     parseMode: parseMode);
@@ -89,7 +91,7 @@ namespace AgentBot.Tools
                 {
                     success = true,
                     message = "Сообщение отправлено",
-                    chat_id = chatId,
+                    chat_id = toolChatId,
                     buttons_count = inlineKeyboard?.InlineKeyboard?.SelectMany(r => r).Count() ?? 0
                 });
             }

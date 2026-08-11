@@ -119,17 +119,28 @@ namespace AgentBot.Services
             // Инструкция по использованию инструментов
             sb.AppendLine("### Инструкция:");
             sb.AppendLine("- Если для ответа нужен инструмент — вызови его.");
-            sb.AppendLine("- Если пользователь просит сохранить данные в файл — используй SendFile для отправки файла.");
-            sb.AppendLine("- Если ответ слишком длинный — используй SendFile для отправки файла с содержимым.");
-            sb.AppendLine("- Для отправки текстового сообщения пользователю используй SendMessage.");
-            sb.AppendLine("- Для отправки документа/файла используй SendFile (с content или file_path).");
+
+            // SendMessage/SendFile выдаются только администраторам — инструктируем модель
+            // только тогда, когда они реально доступны.
+            bool hasSendFile = context.AvailableTools.Any(t => t.Name == "SendFile");
+            bool hasSendMessage = context.AvailableTools.Any(t => t.Name == "SendMessage");
+            if (hasSendFile)
+            {
+                sb.AppendLine("- Если пользователь просит сохранить данные в файл — используй SendFile для отправки файла.");
+                sb.AppendLine("- Если ответ слишком длинный — используй SendFile для отправки файла с содержимым.");
+                sb.AppendLine("- Для отправки документа/файла используй SendFile (с content или file_path).");
+            }
+            if (hasSendMessage)
+            {
+                sb.AppendLine("- Для отправки текстового сообщения пользователю используй SendMessage.");
+            }
             sb.AppendLine();
             sb.AppendLine("### Inline-кнопки в SendMessage:");
             sb.AppendLine("Для интерактивного взаимодействия добавляй inline-кнопки к сообщениям.");
+            sb.AppendLine("Сообщение отправляется в текущий чат автоматически — chat_id указывать не нужно.");
             sb.AppendLine("Формат inline_buttons — массив строк с кнопками:");
             sb.AppendLine("```json");
             sb.AppendLine("{");
-            sb.AppendLine("  \"chat_id\": 123456789,");
             sb.AppendLine("  \"text\": \"Выберите действие:\",");
             sb.AppendLine("  \"inline_buttons\": [");
             sb.AppendLine("    [{\"label\": \"✅ Да\", \"callback_data\": \"confirm_yes\"}, {\"label\": \"❌ Нет\", \"callback_data\": \"confirm_no\"}],");

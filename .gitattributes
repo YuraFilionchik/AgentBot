@@ -3,6 +3,9 @@
 ###############################################################################
 * text=auto
 
+# Force LF line endings for shell scripts (CRLF causes "bad interpreter" errors on Linux)
+*.sh text eol=lf
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

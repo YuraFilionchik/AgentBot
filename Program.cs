@@ -14,10 +14,22 @@ using Serilog;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-// Конфигурация: корневой appsettings.json загружается автоматически через CreateApplicationBuilder.
-// Config/appsettings.json — секреты (токены, ключи). Путь от директории приложения, не от WorkingDirectory.
+// ────────────────────────────────────────────────
+// Конфигурация (приоритет снизу вверх — последний побеждает):
+//   1. appsettings.json              — общие настройки (загружается автоматически)
+//   2. Config/appsettings.json       — секреты (токены, API-ключи)
+//   3. Переменные окружения          — наивысший приоритет, перезаписывают всё выше
+//
+// Переменные окружения используют "__" (двойное подчёркивание) как разделитель секций:
+//   Bots__Telegram__ApiToken   → Bots:Telegram:ApiToken
+//   AiAgent__ApiKey            → AiAgent:ApiKey
+//   AiAgent__Provider          → AiAgent:Provider
+//   WeatherApiKey              → WeatherApiKey
+//   Security__AdminPassword    → Security:AdminPassword
+// ────────────────────────────────────────────────
 var configPath = Path.Combine(AppContext.BaseDirectory, "Config", "appsettings.json");
-builder.Configuration.AddJsonFile(configPath, optional: false, reloadOnChange: true);
+builder.Configuration.AddJsonFile(configPath, optional: true, reloadOnChange: true);
+builder.Configuration.AddEnvironmentVariables();
 
 // Логи (Serilog только в файл)
 builder.Logging.ClearProviders();

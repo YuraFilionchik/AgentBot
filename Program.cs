@@ -91,6 +91,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddTransient<IToolFunction, LinuxCMDTool>();
 builder.Services.AddTransient<IToolFunction, SendMessageTool>();
 builder.Services.AddTransient<IToolFunction, SendFileTool>();
+builder.Services.AddTransient<IToolFunction, BotLogsTool>();
 builder.Services.AddTransient<IToolFunction, CronTool>();
 builder.Services.AddTransient<IToolFunction, BotManagementTool>();
 builder.Services.AddTransient<IToolFunction, SystemdRunTool>();

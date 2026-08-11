@@ -5,7 +5,6 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.DependencyInjection;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -44,8 +43,6 @@ namespace AgentBot.Tools
             _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
             _logger = logger;
         }
-
-        private IBotProvider BotProvider => _serviceProvider.GetRequiredService<IBotProvider>();
 
         public async Task<string> ExecuteAsync(Dictionary<string, object> args, long toolChatId = default)
         {

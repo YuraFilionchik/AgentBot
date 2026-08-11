@@ -74,7 +74,7 @@ namespace AgentBot.Tools
         private async Task<string> HandleRestartAsync()
         {
             _logger.LogInformation("BotManager: restarting service");
-            return await RunScriptAsync($"{_scriptsDir}/restart_agentbot.sh");
+            return await RunScriptAsync($"bash {_scriptsDir}/restart_agentbot.sh");
         }
 
         private async Task<string> HandleUpdateAsync()
@@ -109,7 +109,7 @@ namespace AgentBot.Tools
         private async Task<string> HandleBackupAsync()
         {
             _logger.LogInformation("BotManager: creating backup");
-            return await RunScriptAsync($"{_scriptsDir}/backup_bot.sh make");
+            return await RunScriptAsync($"bash {_scriptsDir}/backup_bot.sh make");
         }
 
         private async Task<string> HandleRestoreAsync(Dictionary<string, object> args)
@@ -120,8 +120,8 @@ namespace AgentBot.Tools
 
             var scriptPath = $"{_scriptsDir}/backup_bot.sh";
             string scriptArgs = string.IsNullOrWhiteSpace(backupFile)
-                ? $"{scriptPath} restore"
-                : $"{scriptPath} restore {backupFile}";
+                ? $"bash {scriptPath} restore"
+                : $"bash {scriptPath} restore {backupFile}";
 
             return await RunScriptAsync(scriptArgs);
         }

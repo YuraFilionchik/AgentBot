@@ -151,6 +151,15 @@ namespace AgentBot.Services
             sb.AppendLine("callback_data передаётся боту при нажатии кнопки (до 64 байт).");
             sb.AppendLine("Используй кнопки для: подтверждений, выбора опций, навигации, быстрых действий.");
 
+            // Чтение собственных логов бота (диагностика)
+            sb.AppendLine();
+            sb.AppendLine("### Логи бота и сервиса (диагностика):");
+            sb.AppendLine("Если пользователь спрашивает про ошибки, сбои, падения или \"почему бот сделал X\" — прочитай логи:");
+            sb.AppendLine("- BotLogs action=app lines=50 — файловый лог приложения (последние строки).");
+            sb.AppendLine("- BotLogs action=grep pattern=\"текст\" — поиск фрагмента в логе приложения.");
+            sb.AppendLine("- BotLogs action=service lines=50 since=\"10 minutes ago\" — логи systemd-сервиса (journalctl -u agentbot).");
+            sb.AppendLine("Инструмент BotLogs сам находит файл лога; для сервисных логов используй юнит agentbot.");
+
             return sb.ToString();
         }
 

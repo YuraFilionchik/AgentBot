@@ -10,6 +10,9 @@ REPO_URL="https://github.com/YuraFilionchik/AgentBot"
 SOURCE_CODE_DIR="/home/dtdev/agentbot_source" 
 PUBLISH_DIR="/home/dtdev/AgentBot"
 SERVICE_NAME="agentbot.service"
+# Владелец каталога развёртывания — вернём его после root-publish,
+# чтобы сервис-юзер сохранил права записи в каталог развёртывания.
+PUBLISH_OWNER=$(stat -c '%U:%G' "$PUBLISH_DIR" 2>/dev/null || stat -c '%U:%G' "$INITIAL_PWD" 2>/dev/null || echo "dtdev:dtdev")
 
 # --check: проверить наличие обновлений без сборки и перезапуска.
 # Выводит: NO_UPDATES | HAS_UPDATES (со списком коммитов) | FIRST_RUN
@@ -35,7 +38,8 @@ if [ "$1" = "--check" ]; then
 fi
 
 # 1. Делаем бэкап текущих конфигов перед любыми действиями
-"$INITIAL_PWD/backup_bot.sh" make
+# Вызов через bash, чтобы не зависеть от бита исполнения (+x) у скрипта
+bash "$INITIAL_PWD/backup_bot.sh" make
 
 echo "🚀 Начинаем процесс обновления $SERVICE_NAME..."
 
@@ -83,7 +87,12 @@ dotnet publish -c Release -r linux-x64 --self-contained false -o "$PUBLISH_DIR" 
 # 4. Восстановление настроек
 # Важно: делаем это ДО рестарта, чтобы сервис подхватил свежие файлы
 echo "🔄 Восстановление настроек из бэкапа..."
-"$INITIAL_PWD/backup_bot.sh" restore
+bash "$INITIAL_PWD/backup_bot.sh" restore
+
+# publish выполнялся под root — возвращаем владельца каталога развёртывания
+# (новые файлы/каталоги из dotnet publish остались root-овладельцами)
+echo "🔄 Восстановление прав доступа к каталогу развёртывания..."
+chown -R "$PUBLISH_OWNER" "$PUBLISH_DIR"
 
 echo "🔄 Восстановление прав доступа к скриптам...  "
 chown root:root $INITIAL_PWD/backup_bot.sh
@@ -93,16 +102,10 @@ chmod +x $INITIAL_PWD/backup_bot.sh
 chmod +x $INITIAL_PWD/restart_agentbot.sh
 chmod +x $INITIAL_PWD/update_agentbot.sh
 
-# 5. Перезапуск сервиса
-echo "🔄 Запланирован перезапуск сервиса $SERVICE_NAME..."
-
-# Запускаем рестарт в фоне с задержкой в 2 секунды, 
-# чтобы этот скрипт успел отпустить управление и не был убит мгновенно
-(sleep 2 && sudo systemctl restart "$SERVICE_NAME") & 
+# 5. Перезапуск сервиса — планируем отдельным независимым юнитом systemd,
+# чтобы рестарт пережил завершение этого (транзиентного) юнита и не был убит systemd.
+echo "🔄 Запланирован перезапуск сервиса $SERVICE_NAME через 2 секунды..."
+sudo systemd-run --on-active=2s --collect systemctl restart "$SERVICE_NAME"
 
 echo "✅ Скрипт обновления передал команду системе и завершается."
 exit 0
-
-# 6. Проверка результата
-echo "✅ Обновление завершено успешно!"
-sudo systemctl status "$SERVICE_NAME" --no-pager -n 5

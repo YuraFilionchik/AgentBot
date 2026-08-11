@@ -322,7 +322,7 @@ namespace AgentBot.Handlers
                 await Task.Delay(1500);
                 try
                 {
-                    await RunScriptAsync("scripts/restart_agentbot.sh");
+                    await RunScriptAsync("bash scripts/restart_agentbot.sh");
                 }
                 catch (Exception ex)
                 {
@@ -346,7 +346,7 @@ namespace AgentBot.Handlers
 
             try
             {
-                string output = await RunScriptAsync("scripts/backup_bot.sh", "make");
+                string output = await RunScriptAsync("bash scripts/backup_bot.sh", "make");
                 return $"💾 Бекап создан:\n\n```\n{output}\n```";
             }
             catch (Exception ex)
@@ -370,7 +370,7 @@ namespace AgentBot.Handlers
             try
             {
                 string args = string.IsNullOrWhiteSpace(backupFile) ? "restore" : $"restore {backupFile}";
-                string output = await RunScriptAsync("scripts/backup_bot.sh", args);
+                string output = await RunScriptAsync("bash scripts/backup_bot.sh", args);
                 return $"✅ Восстановление завершено:\n\n```\n{output}\n```";
             }
             catch (Exception ex)

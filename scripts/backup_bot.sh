@@ -55,10 +55,19 @@ make_backup() {
 }
 
 restore_backup() {
+    local backup_file="$1"
     echo "🔄 [$(date +'%H:%M:%S')] Запуск восстановления..."
 
-    # Поиск последнего архива
-    LATEST=$(ls -t "$BACKUP_BASE_DIR"/agentbot_backup_*.tar.gz 2>/dev/null | head -n 1)
+    # Если указан конкретный файл — используем его, иначе последний архив
+    if [ -n "$backup_file" ] && [ -f "$BACKUP_BASE_DIR/$backup_file" ]; then
+        LATEST="$BACKUP_BASE_DIR/$backup_file"
+        echo "📦 Используется указанный архив: $backup_file"
+    else
+        if [ -n "$backup_file" ]; then
+            echo "⚠️ Файл '$backup_file' не найден в $BACKUP_BASE_DIR, использую последний архив."
+        fi
+        LATEST=$(ls -t "$BACKUP_BASE_DIR"/agentbot_backup_*.tar.gz 2>/dev/null | head -n 1)
+    fi
 
     if [ -z "$LATEST" ]; then
         echo "❌ Ошибка: Файлы бэкапа не найдены."
@@ -95,7 +104,7 @@ case "$ACTION" in
         make_backup
         ;;
     restore)       
-        restore_backup
+        restore_backup "$2"
         ;;
     *)
         echo "Использование: $0 {make|restore} (по умолчанию: make)"
